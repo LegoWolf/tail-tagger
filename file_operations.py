@@ -235,6 +235,21 @@ class FileOperations:
         else:
             print("Export cancelled by user.")
 
+    def export_metadata_efu(self, parent, last_folder_path):
+        print(f"export_metadata_efu! {last_folder_path}")
+        metadata_filepath = os.path.join(last_folder_path, ".metadata.efu")
+        try:
+            with open(metadata_filepath, 'w', encoding='utf-8') as f:
+                f.write("Filename,Tags\n")
+                all_tags = self.gather_all_tags(last_folder_path)
+
+                for image_path, tags in all_tags.items():
+                    filename = os.path.relpath(image_path, last_folder_path)
+                    f.write(filename + ',"' + ';'.join(tags) + '"\n')
+                    print(f"  Wrote tags for {filename} to {metadata_filepath}")
+        except Exception as e:
+            print(f"  Error writing to {metadata_filepath}: {e}")
+
     def create_default_workfile(self, folder_path):
         """Creates a default workfile if one doesn't exist."""
         workfile_path = self.get_workfile_path(folder_path)
