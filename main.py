@@ -169,6 +169,10 @@ class MainWindow(QMainWindow):
         export_action = file_menu.addAction("Export .metadata.efu...")
         export_action.triggered.connect(self._export_metadata_efu)
 
+        export_action = file_menu.addAction("Export EXIF...")
+        export_action.triggered.connect(self._export_exif)
+
+
         # --- End Menu Bar ---
 
         main_layout = QVBoxLayout(central_widget) # Set layout on central widget
@@ -416,6 +420,9 @@ class MainWindow(QMainWindow):
 
     def _export_metadata_efu(self):
         self.file_operations.export_metadata_efu(self, self.last_folder_path)
+
+    def _export_exif(self):
+        self.file_operations.export_exif(self, self.last_folder_path)
 
     # LEGACY: This method is kept for backward compatibility and for full refreshes
     # Modern approach uses observer pattern and targeted panel updates

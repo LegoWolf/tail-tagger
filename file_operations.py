@@ -1,6 +1,8 @@
 import os
 import json
 import csv
+from PIL import Image, ExifTags
+from pprint import pprint
 
 class FileOperations:
     """Handles file system operations for the image tagger."""
@@ -235,8 +237,22 @@ class FileOperations:
         else:
             print("Export cancelled by user.")
 
+    def export_exif(self, parent, last_folder_path):
+        print(f"exporting EXIF data:")
+        all_tags = self.gather_all_tags(last_folder_path)
+        for image_path, tags in all_tags.items():
+            try:
+                with Image.open(image_path) as im:
+                    exif = im.getexif()
+                    keywords = ";".join([FileOperations.convert_underscores_to_spaces(tag) for tag in tags]).encode("utf-16")
+                    exif[ExifTags.Base.XPKeywords] = keywords
+                    im.save(image_path, exif=exif, quality='keep')
+                    print(f"  Wrote EXIF keywords to: {image_path}")
+            except Exception as e:
+                print(f"  Error writing to {image_path}: {e}")
+
     def export_metadata_efu(self, parent, last_folder_path):
-        print(f"export_metadata_efu! {last_folder_path}")
+        print(f"exporting .metadata.efu to: {last_folder_path}")
         metadata_filepath = os.path.join(last_folder_path, ".metadata.efu")
         try:
             with open(metadata_filepath, 'w', encoding='utf-8') as f:
