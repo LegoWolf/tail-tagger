@@ -242,12 +242,13 @@ class FileOperations:
         all_tags = self.gather_all_tags(last_folder_path)
         for image_path, tags in all_tags.items():
             try:
-                with Image.open(image_path) as im:
-                    exif = im.getexif()
-                    keywords = ";".join([FileOperations.convert_underscores_to_spaces(tag) for tag in tags]).encode("utf-16")
-                    exif[ExifTags.Base.XPKeywords] = keywords
-                    im.save(image_path, exif=exif, quality='keep')
-                    print(f"  Wrote EXIF keywords to: {image_path}")
+                if len(tags) > 0:
+                    with Image.open(image_path) as im:
+                        exif = im.getexif()
+                        keywords = ";".join([FileOperations.convert_underscores_to_spaces(tag) for tag in tags]).encode("utf-16")
+                        exif[ExifTags.Base.XPKeywords] = keywords
+                        im.save(image_path, exif=exif, quality='keep')
+                        print(f"  Wrote EXIF keywords to: {image_path}")
             except Exception as e:
                 print(f"  Error writing to {image_path}: {e}")
 
