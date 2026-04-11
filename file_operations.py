@@ -252,6 +252,26 @@ class FileOperations:
             except Exception as e:
                 print(f"  Error writing to {image_path}: {e}")
 
+    def export_xmp(self, parent, last_folder_path):
+        import subprocess
+        print(f"exporting XMP data:")
+        all_tags = self.gather_all_tags(last_folder_path)
+        for image_path, tags in all_tags.items():
+            try:
+                if len(tags) > 0:
+                    keywords = [FileOperations.convert_underscores_to_spaces(tag) for tag in tags]
+                    keywords_str = ', '.join(keywords)
+                    p = subprocess.run(['exiv2', '-M', f'set Xmp.dc.subject {keywords_str}', image_path])
+                    if p.returncode == 0:
+                        print(f"  Wrote XMP keywords to: {image_path}")
+                    else:
+                        print(f"  Error writing XMP keywords to {image_path}: return code {p.returncode}")
+                    # keywords_stream = '\n'.join([f'set Iptc.Application2.Subject {kw}' for kw in keywords])
+                    # p = subprocess.run(['exiv2', '-m-', image_path], input=keywords_stream, encoding='utf-8')
+                    # print(f"  Wrote IPTC keywords to: {image_path} ({p.returncode})")
+            except Exception as e:
+                print(f"  Error writing to {image_path}: {e}")
+
     def export_metadata_efu(self, parent, last_folder_path):
         print(f"exporting .metadata.efu to: {last_folder_path}")
         metadata_filepath = os.path.join(last_folder_path, ".metadata.efu")
