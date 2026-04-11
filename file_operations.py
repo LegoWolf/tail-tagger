@@ -260,15 +260,12 @@ class FileOperations:
             try:
                 if len(tags) > 0:
                     keywords = [FileOperations.convert_underscores_to_spaces(tag) for tag in tags]
-                    keywords_str = ', '.join(keywords)
-                    p = subprocess.run(['exiv2', '-M', f'set Xmp.dc.subject {keywords_str}', image_path])
+                    keywords_stream = '\n'.join([f'set Xmp.dc.subject {kw}' for kw in keywords])
+                    p = subprocess.run(['exiv2', '-m-', image_path], input=keywords_stream, encoding='utf-8')
                     if p.returncode == 0:
                         print(f"  Wrote XMP keywords to: {image_path}")
                     else:
                         print(f"  Error writing XMP keywords to {image_path}: return code {p.returncode}")
-                    # keywords_stream = '\n'.join([f'set Iptc.Application2.Subject {kw}' for kw in keywords])
-                    # p = subprocess.run(['exiv2', '-m-', image_path], input=keywords_stream, encoding='utf-8')
-                    # print(f"  Wrote IPTC keywords to: {image_path} ({p.returncode})")
             except Exception as e:
                 print(f"  Error writing to {image_path}: {e}")
 
