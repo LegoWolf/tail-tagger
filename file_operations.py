@@ -474,7 +474,7 @@ class FileOperations:
         def natural_sort_key(s):
             return [int(text) if text.isdigit() else text.lower() for text in re.split('([0-9]+)', s)]
 
-        image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp']
+        image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
         try:
             filenames = [f for f in os.listdir(folder_path) if any(f.lower().endswith(ext) for ext in image_extensions)]
             filenames.sort(key=natural_sort_key)
