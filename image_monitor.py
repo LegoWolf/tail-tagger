@@ -125,7 +125,7 @@ def image_processor(image_queue):
 
         if now - timestamp > DELAY:
             delay_queue.popitem()
-
+            print(f'Checking {image_path}...')
             try:
                 if not check_has_xmp_tag(image_path, CLASSIFIED_TAG):
                     tags = classifier.classify_image(image_path, SCORE_CUTOFF)
