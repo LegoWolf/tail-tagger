@@ -17,6 +17,7 @@ DELAY = 1
 IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
 SCORE_CUTOFF = 0.30
 CLASSIFIED_TAG = 'e621-jtp3'
+WATCH_ROOT = "D:\\Shared\\Archived\\Media\\Images\\Yiffy\\Furry\\Glyn\\TagTest\\"
 
 def is_image_file(filepath) -> bool:
     return os.path.splitext(filepath)[1].lower() in IMAGE_EXTENSIONS
@@ -91,7 +92,7 @@ class Classifier:
 def check_has_xmp_tag(image_path, tag):
     try:
         return tag in subprocess.check_output(['exiv2', '-px', 'pr', image_path]).decode('utf-8')
-    except CalledProcessError as e:
+    except subprocess.CalledProcessError as e:
         print(f'Error: failed to find tag "{tag}" in {image_path}')
         return True
 
@@ -145,7 +146,7 @@ worker_thread.start()
 
 event_handler = MyEventHandler()
 observer = Observer()
-observer.schedule(event_handler, "D:\\Downloads\\yiffy", recursive=True)
+observer.schedule(event_handler, WATCH_ROOT, recursive=True)
 observer.start()
 try:
     while True:
