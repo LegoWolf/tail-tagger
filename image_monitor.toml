@@ -1,0 +1,6 @@
+delay = 1
+image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
+score_cutoff = 0.30
+classified_tag = 'e621-jtp3'
+# watch_root = "D:/Shared/Archived/Media/Images/Yiffy/Furry/Glyn/TagTest"
+watch_root = "D:/Downloads/yiffy"
