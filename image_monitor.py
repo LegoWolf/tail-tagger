@@ -208,7 +208,7 @@ def main():
 LOG_FORMAT = '%(asctime)s %(levelname)s: %(message)s'
 config = {
     "delay": 1,
-    "image_extensions": ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'],
+    "image_extensions": ['.jpg', '.jpeg', '.png', '.bmp', '.webp'],
     "score_cutoff": 0.30,
     "classified_tag": 'e621-jtp3',
     "watch_root": "D:/Downloads/yiffy"
