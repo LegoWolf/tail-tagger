@@ -94,11 +94,23 @@ class Classifier:
         logging.debug(f"Found {len(results)} tags above INTERNAL threshold {INTERNAL_THRESHOLD} and with a score above {score_cutoff}.")
         return [result[0] for result in results], end_preprocess - start_preprocess, end_inference - start_inference
 
+def run_command(args, input=None) -> bool:
+    process = subprocess.run(
+        args,
+        input=input,
+        encoding='utf-8',
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE)
+    return process.returncode, process.stdout.strip(), process.stderr.strip()
+
 def check_has_xmp_tag(image_path, tag):
-    try:
-        return tag in subprocess.check_output(['exiv2', '-px', 'pr', image_path]).decode('utf-8')
-    except subprocess.CalledProcessError as e:
-        logging.error(f'Failed to find tag "{tag}" in {image_path}')
+    return_code, stdout, stderr = run_command(['exiv2', '-px', 'pr', image_path])
+    if return_code == 0:
+        for error in stderr.splitlines():
+            logging.warning(f'{error} (while checking tags on: {image_path})')
+        return tag in stdout
+    else:
+        logging.error(f'Failed to find tag "{tag}" in {image_path} ({stderr})')
         return True
 
 def write_xmp_tags(image_path, tags):
@@ -107,12 +119,14 @@ def write_xmp_tags(image_path, tags):
             # Preserve the current modified time.
             modified_time = os.path.getmtime(image_path)
             keywords = [tag.replace('_', ' ') for tag in tags]
-            keywords_stream = '\n'.join([f'set Xmp.dc.subject {kw}' for kw in keywords])
-            p = subprocess.run(['exiv2', '-m-', image_path], input=keywords_stream, encoding='utf-8')
-            if p.returncode == 0:
+            keywords_buffer = '\n'.join([f'set Xmp.dc.subject {kw}' for kw in keywords])
+            return_code, stdout, stderr = run_command(['exiv2', '-m-', image_path], input=keywords_buffer)
+            if return_code == 0:
+                for error in stderr.splitlines():
+                    logging.warning(f'{error} (while setting tags on: {image_path})')
                 logging.debug(f"Wrote XMP keywords to: {image_path}")
             else:
-                logging.error(f"Failed to write XMP keywords to {image_path}: return code {p.returncode}")
+                logging.error(f'Failed to write XMP tags to {image_path} ({stderr})')
             access_time = os.path.getatime(image_path)
             os.utime(image_path, times=(access_time, modified_time))
     except Exception as e:
