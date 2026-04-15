@@ -161,10 +161,7 @@ def image_processor(image_queue):
     delay_queue = DelayQueue(image_queue)
     classifier = Classifier(model_path=MODEL_PATH)
 
-    while True:
-        if not delay_queue.update():
-            return
-
+    while delay_queue.update():
         image_path, timestamp, event = delay_queue.peek()
         time_delay = time.time() - timestamp
 
