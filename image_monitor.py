@@ -177,7 +177,7 @@ def image_processor(image_queue):
                     write_xmp_tags(image_path, tags)
                     logging.info(f'{event:8} {time_delay:2.2f}s {time_preprocess:2.2f}s {time_inference:2.2f}s {len(tags):3} {image_path}')
             except subprocess.CalledProcessError as e:
-                logging.error(f"Called process '{' '.join(e.cmd)}' failed: {e.stderr.strip()} ({e.returncode})")
+                logging.error(f"Called process '{' '.join(e.cmd)}' failed: {e.stderr.strip()} (return code: {e.returncode})")
             except Exception as e:
                 logging.error(f"Image processing failed: {e} ({image_path})")
                 logging.debug(f"Stack trace:\n{traceback.format_exc().strip()}")
