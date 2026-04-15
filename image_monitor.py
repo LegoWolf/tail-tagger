@@ -49,7 +49,7 @@ class Classifier:
             model_path=model_path,
             device=self.device
         )
-        logging.info("Loaded JTP-3 inference module.")
+        logging.debug("Loaded JTP-3 inference module.")
 
     def classify_image(self, image_path, score_cutoff):
         logging.debug(f"Loading and preprocessing image {image_path}...")
@@ -130,7 +130,7 @@ def image_processor(image_queue):
 
     delay_queue = heapdict.heapdict()
     delay_event = {}
-    classifier = Classifier(model_path="classifiers/JTP-3/jtp-3-hydra.safetensors")
+    classifier = Classifier(model_path=MODEL_PATH)
 
     while True:
         while not image_queue.empty():
@@ -205,6 +205,7 @@ def main():
     except Exception as e:
         logging.error(e)
 
+MODEL_PATH="classifiers/JTP-3/jtp-3-hydra.safetensors"
 LOG_FORMAT = '%(asctime)s %(levelname)s: %(message)s'
 config = {
     "delay": 1,

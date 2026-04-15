@@ -11,6 +11,7 @@ import time
 from io import BytesIO
 from math import ceil
 from typing import Any, Callable
+import logging
 
 import torch
 from torch import Tensor
@@ -527,7 +528,7 @@ def load_jtp3_model(
         Tuple of (model, list of tag names)
     """
     load_start_time = time.time()
-    print(f"LoadJTP3: Loading model from {model_path}...")
+    logging.debug(f"LoadJTP3: Loading model from {model_path}...")
 
     # Load model metadata and weights
     with safe_open(model_path, framework="pt", device="cpu") as file:
@@ -544,10 +545,10 @@ def load_jtp3_model(
 
     # Extract tags from metadata
     tags = metadata["classifier.labels"].split("\n")
-    print(f"LoadJTP3: Loaded {len(tags)} tags from model metadata.")
+    logging.debug(f"LoadJTP3: Loaded {len(tags)} tags from model metadata.")
 
     # Create base model
-    print("LoadJTP3: Creating NAFlex ViT model structure...")
+    logging.debug("LoadJTP3: Creating NAFlex ViT model structure...")
     model = timm.create_model(
         'naflexvit_so400m_patch16_siglip',
         pretrained=False, num_classes=0,
@@ -560,7 +561,7 @@ def load_jtp3_model(
     arch_suffix = arch[31:]  # Extract suffix after "naflexvit_so400m_patch16_siglip"
 
     if arch_suffix == "+rr_hydra":
-        print("LoadJTP3: Using Hydra classifier head...")
+        logging.debug("LoadJTP3: Using Hydra classifier head...")
         model.attn_pool = HydraPool.for_state(
             state_dict, "attn_pool.",
             device=device, dtype=torch.bfloat16
@@ -571,13 +572,13 @@ def load_jtp3_model(
         raise ValueError(f"Unsupported JTP-3 architecture suffix: {arch_suffix}")
 
     # Load weights
-    print("LoadJTP3: Loading model weights...")
+    logging.debug("LoadJTP3: Loading model weights...")
     model.eval().to(dtype=torch.bfloat16)
     model.load_state_dict(state_dict, strict=True)
     model.to(device=device)
 
     load_end_time = time.time()
-    print(f"LoadJTP3: Model loaded in {load_end_time - load_start_time:.2f} seconds.")
+    logging.info(f"LoadJTP3: Model loaded in {load_end_time - load_start_time:.2f} seconds.")
 
     return model, tags
 
@@ -602,7 +603,7 @@ def preprocess_jtp3(
         - patch_coords: Tensor of shape (max_seqlen, 2) with (y, x) coordinates
         - patch_valid: Boolean tensor of shape (max_seqlen) indicating valid patches
     """
-    print(f"PreprocessJTP3: Loading and processing image {image_path}...")
+    logging.debug(f"PreprocessJTP3: Loading and processing image {image_path}...")
 
     # Load and process image
     with open(image_path, "rb", buffering=(1024 * 1024)) as file:
@@ -622,7 +623,7 @@ def preprocess_jtp3(
     if img is not processed:
         img.close()
 
-    print(f"PreprocessJTP3: Resized to {processed.size}, patchifying...")
+    logging.debug(f"PreprocessJTP3: Resized to {processed.size}, patchifying...")
 
     # Create patch tensors
     patches = torch.zeros(max_seqlen, patch_size * patch_size * 3, device="cpu", dtype=torch.uint8)
@@ -632,7 +633,7 @@ def preprocess_jtp3(
     # Extract patches
     put_srgb_patch(processed, patches, patch_coords, patch_valid, patch_size)
 
-    print(f"PreprocessJTP3: Extracted {patch_valid.sum().item()} patches.")
+    logging.debug(f"PreprocessJTP3: Extracted {patch_valid.sum().item()} patches.")
 
     return patches, patch_coords, patch_valid
 
@@ -659,7 +660,7 @@ def run_inference_jtp3(
         Tensor of confidence scores for each tag (shape: [num_classes])
         Values range from -1.0 (absent) to 1.0 (present), with 0.0 being neutral
     """
-    print("InferenceJTP3: Running inference...")
+    logging.debug("InferenceJTP3: Running inference...")
     start_inference = time.time()
 
     # Move to device and prepare tensors
@@ -680,6 +681,6 @@ def run_inference_jtp3(
         probabilities = (probabilities * 2.0) - 1.0  # Scale to -1..1 (1=present, 0=neutral, -1=absent)
 
     end_inference = time.time()
-    print(f"InferenceJTP3: Inference took {end_inference - start_inference:.3f} seconds.")
+    logging.debug(f"InferenceJTP3: Inference took {end_inference - start_inference:.3f} seconds.")
 
     return probabilities
