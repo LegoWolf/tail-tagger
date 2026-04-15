@@ -108,7 +108,9 @@ def check_has_xmp_tag(image_path, tag):
     if return_code == 0:
         for error in stderr.splitlines():
             logging.warning(f'{error} (while checking tags on: {image_path})')
-        return tag in stdout
+        has_tag = tag in stdout
+        logging.info(f'{"Has" if has_tag else "Missing"} JTP-3 tag: {image_path}')
+        return has_tag
     else:
         logging.error(f'Failed to find tag "{tag}" in {image_path} ({stderr})')
         return True
@@ -132,49 +134,63 @@ def write_xmp_tags(image_path, tags):
     except Exception as e:
         logging.error(f"Failed to write to {image_path}: {e}")
 
-def image_processor(image_queue):
-    def dequeue():
-        item = image_queue.get()
-        if item is None:
+class DelayQueue:
+    def __init__(self, queue):
+        self.queue = queue
+        self.delay_queue = heapdict.heapdict()
+        self.delay_info = {}
+
+    def dequeue(self):
+        entry = self.queue.get()
+        if entry is None:
             return False
-        (image_path, timestamp, event) = item
-        delay_queue[image_path] = timestamp
-        delay_event[image_path] = event
+        (item, timestamp, info) = entry
+        self.delay_queue[item] = timestamp
+        self.delay_info[item] = info
         return True
 
-    delay_queue = heapdict.heapdict()
-    delay_event = {}
+    def update(self) -> bool:
+        while not self.queue.empty():
+            if not self.dequeue():
+                return False
+        if len(self.delay_queue) == 0:
+            if not self.dequeue():
+                return False
+        return True
+
+    def peek(self):
+        (item, timestamp) = self.delay_queue.peekitem()
+        return item, timestamp, self.delay_info[item]
+
+    def pop(self):
+        (item, timestamp) = self.delay_queue.popitem()
+        return item, timestamp, self.delay_info.pop(item)
+
+def image_processor(image_queue):
+    delay_queue = DelayQueue(image_queue)
     classifier = Classifier(model_path=MODEL_PATH)
 
     while True:
-        while not image_queue.empty():
-            if not dequeue():
-                return
-        if len(delay_queue) == 0:
-            if not dequeue():
-                return
+        if not delay_queue.update():
+            return
 
-        (image_path, timestamp) = delay_queue.peekitem()
-        event = delay_event[image_path]
-        now = time.time()
+        image_path, timestamp, event = delay_queue.peek()
+        time_delay = time.time() - timestamp
 
-        if now - timestamp > config["delay"]:
-            delay_queue.popitem()
-            del delay_event[image_path]
+        if time_delay < config["delay_seconds"]:
+            time.sleep(config["delay_seconds"] - time_delay)
+        else:
+            image_path, timestamp, event = delay_queue.pop()
             logging.debug(f'Checking {image_path}...')
             try:
                 if not check_has_xmp_tag(image_path, config["classified_tag"]):
-                    time_delay = time.time() - timestamp
                     tags, time_preprocess, time_inference = classifier.classify_image(image_path, config["score_cutoff"])
                     tags.append(config["classified_tag"])
                     write_xmp_tags(image_path, tags)
                     logging.info(f'{event:8} {time_delay:2.2f}s {time_preprocess:2.2f}s {time_inference:2.2f}s {len(tags):3} {image_path}')
-
             except Exception as e:
                 logging.error(f"ERROR during JTP-3 analysis: {e}")
-                traceback.print_exc()
-        else:
-            time.sleep(now - timestamp + 0.5)
+                logging.error(f"Stack trace:\n{traceback.format_exc()}")
 
 def main():
     import __main__
@@ -222,7 +238,7 @@ def main():
 MODEL_PATH="classifiers/JTP-3/jtp-3-hydra.safetensors"
 LOG_FORMAT = '%(asctime)s %(levelname)s: %(message)s'
 config = {
-    "delay": 1,
+    "delay_seconds": 1,
     "image_extensions": ['.jpg', '.jpeg', '.png', '.bmp', '.webp'],
     "score_cutoff": 0.30,
     "classified_tag": 'e621-jtp3',

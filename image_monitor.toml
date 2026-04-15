@@ -1,4 +1,4 @@
-delay = 1
+delay_seconds = 1
 image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.webp'] # Exclude GIF because it does not accept tags.
 score_cutoff = 0.30
 classified_tag = 'e621-jtp3'
