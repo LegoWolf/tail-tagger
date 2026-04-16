@@ -1,7 +1,24 @@
 delay_seconds = 1
-image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.webp'] # Exclude GIF because it does not accept tags.
 score_cutoff = 0.30
 classified_tag = 'e621-jtp3'
-watch_root = "D:/Shared/Archived/Media/Images/Yiffy/Furry/Glyn/TagTest"
-# watch_root = "D:/Downloads/yiffy"
-# watch_root = "/Users/falkner/Downloads/yiffy"
+include_folders = [
+	"D:\\Shared\\Archived\\Media\\Images\\Yiffy\\Furry\\Glyn\\TagTest",
+	# "D:\\Downloads\\yiffy\\Folder 1",
+	# "D:\\Downloads\\yiffy\\Folder 2",
+	# "/Users/falkner/Downloads/yiffy",
+]
+
+# Patterns follow the Python pattern language:
+# https://docs.python.org/3/library/pathlib.html#pathlib-pattern-language
+include_patterns = [
+	# Don't include GIFs because they do not accept tags.
+	'*.jpg',
+	'*.jpeg',
+	'*.png',
+	'*.bmp',
+	'*.webp'
+]
+
+exclude_patterns = [
+	# "D:\\Downloads\\yiffy\\Folder 1\\Ignore\\**\\*",
+]

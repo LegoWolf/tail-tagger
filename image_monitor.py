@@ -10,7 +10,7 @@ import traceback
 import argparse
 import sys
 
-from watchdog.events import FileSystemEvent, FileSystemEventHandler
+from watchdog.events import FileSystemEvent, PatternMatchingEventHandler
 from watchdog.observers import Observer
 
 from inference import (
@@ -22,19 +22,18 @@ try:
 except ModuleNotFoundError:
     import tomli as tomllib  # Python 3.10
 
-def is_image_file(filepath) -> bool:
-    return os.path.splitext(filepath)[1].lower() in config["image_extensions"]
+class MonitorEventHandler(PatternMatchingEventHandler):
+    def __init__(self, image_queue, **kwargs):
+        super().__init__(**kwargs)
+        self.image_queue = image_queue
 
-class MyEventHandler(FileSystemEventHandler):
     def on_created(self, event: FileSystemEvent) -> None:
-        if not event.is_directory and is_image_file(event.src_path):
-            logging.debug(f'Image created: queuing {event.src_path}')
-            image_queue.put((event.src_path, time.time(), "created"))
+        logging.debug(f'Event: image created: queuing {event.src_path}')
+        self.image_queue.put((event.src_path, time.time(), "created"))
 
     def on_modified(self, event: FileSystemEvent) -> None:
-        if not event.is_directory and is_image_file(event.src_path):
-            logging.debug(f'Image modified: queueing {event.src_path}')
-            image_queue.put((event.src_path, time.time(), "modified"))
+        logging.debug(f'Event: image modified: queueing {event.src_path}')
+        self.image_queue.put((event.src_path, time.time(), "modified"))
 
 class Classifier:
     def __init__(self, model_path):
@@ -170,14 +169,17 @@ def image_processor(image_queue):
         else:
             image_path, timestamp, event = delay_queue.pop()
             logging.debug(f'Checking {image_path}...')
+
             try:
                 if not check_has_xmp_tag(image_path, config["classified_tag"]):
                     tags, time_preprocess, time_inference = classifier.classify_image(image_path, config["score_cutoff"])
                     tags.append(config["classified_tag"])
                     write_xmp_tags(image_path, tags)
                     logging.info(f'{event:8} {time_delay:2.2f}s {time_preprocess:2.2f}s {time_inference:2.2f}s {len(tags):3} {image_path}')
+
             except subprocess.CalledProcessError as e:
                 logging.error(f"Called process '{' '.join(e.cmd)}' failed: {e.stderr.strip()} (return code: {e.returncode})")
+
             except Exception as e:
                 logging.error(f"Image processing failed: {e} ({image_path})")
                 logging.debug(f"Stack trace:\n{traceback.format_exc().strip()}")
@@ -198,12 +200,19 @@ def main():
     logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
 
     try:
+        image_queue = queue.Queue()
         worker_thread = threading.Thread(target=image_processor, args=(image_queue,))
         worker_thread.start()
 
-        event_handler = MyEventHandler()
         observer = Observer()
-        observer.schedule(event_handler, config["watch_root"], recursive=True)
+        for folder in config["include_folders"]:
+            event_handler = MonitorEventHandler(
+                image_queue,
+                patterns=config["include_patterns"],
+                ignore_patterns=config["exclude_patterns"],
+                ignore_directories=True,
+                case_sensitive=False)
+            observer.schedule(event_handler, folder, recursive=True)
         observer.start()
 
         try:
@@ -227,14 +236,15 @@ def main():
 
 MODEL_PATH="classifiers/JTP-3/jtp-3-hydra.safetensors"
 LOG_FORMAT = '%(asctime)s %(levelname)s: %(message)s'
+
 config = {
     "delay_seconds": 1,
-    "image_extensions": ['.jpg', '.jpeg', '.png', '.bmp', '.webp'],
     "score_cutoff": 0.30,
     "classified_tag": 'e621-jtp3',
-    "watch_root": "D:/Downloads/yiffy"
+    "include_folders": [ "D:/Downloads/yiffy" ],
+    "include_patterns": ['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.webp'],
+    "exclude_patterns": []
 }
-image_queue = queue.Queue()
 
 if __name__ == '__main__':
     main()
