@@ -171,11 +171,13 @@ def image_processor(image_queue):
             logging.debug(f'Checking {image_path}...')
 
             try:
+                start_job = time.time()
                 if not check_has_xmp_tag(image_path, config["classified_tag"]):
                     tags, time_preprocess, time_inference = classifier.classify_image(image_path, config["score_cutoff"])
                     tags.append(config["classified_tag"])
                     write_xmp_tags(image_path, tags)
-                    logging.info(f'{event:8} {time_delay:2.2f}s {time_preprocess:2.2f}s {time_inference:2.2f}s {len(tags):3} {image_path}')
+                    time_job = time.time() - start_job
+                    logging.info(f'{event:8} {time_delay:.2f}s {time_preprocess:.2f}s {time_inference:.2f}s {time_job:.2f}s {len(tags):3} {image_path}')
 
             except subprocess.CalledProcessError as e:
                 logging.error(f"Called process '{' '.join(e.cmd)}' failed: {e.stderr.strip()} (return code: {e.returncode})")
