@@ -22,3 +22,8 @@ include_patterns = [
 exclude_patterns = [
 	# "D:\\Downloads\\yiffy\\Folder 1\\Ignore\\**\\*",
 ]
+
+[logging]
+level = "info"
+file_size = 1048576
+max_files = 10

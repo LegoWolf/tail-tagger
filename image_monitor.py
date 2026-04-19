@@ -22,6 +22,25 @@ try:
 except ModuleNotFoundError:
     import tomli as tomllib  # Python 3.10
 
+MODEL_PATH="classifiers/JTP-3/jtp-3-hydra.safetensors"
+LOG_FORMAT = '%(asctime)s %(levelname)s: %(message)s'
+
+DEFAULT_CONFIG = {
+    "delay_seconds": 1,
+    "score_cutoff": 0.30,
+    "classified_tag": 'e621-jtp3',
+    "include_folders": [ "D:/Downloads/yiffy" ],
+    "include_patterns": ['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.webp'],
+    "exclude_patterns": [],
+    "logging": {
+        "file_size": 1024 * 1024,
+        "max_files": 10,
+        "level": "info",
+    }
+}
+
+config = {}
+
 class MonitorEventHandler(PatternMatchingEventHandler):
     def __init__(self, image_queue, **kwargs):
         super().__init__(**kwargs)
@@ -188,18 +207,32 @@ def image_processor(image_queue):
 
 def main():
     import __main__
-    config_filename = os.path.splitext(__main__.__file__)[0] + '.toml'
-    log_filename = os.path.splitext(__main__.__file__)[0] + '.log'
+    config_filepath = os.path.splitext(__main__.__file__)[0] + '.toml'
+    log_filepath = os.path.splitext(__main__.__file__)[0] + '.log'
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default='.', help=f"path to the {config_filename} file.")
-    parser.add_argument("--loglevel", default="info", choices=["debug", "info", "warning", "error"], help="minimum level of messages to log")
+    parser.add_argument("--config", default='.', help=f"path to the {os.path.basename(config_filepath)} file.")
+    parser.add_argument("--loglevel", choices=["debug", "info", "warning", "error"], help="minimum level of messages to log")
     args = parser.parse_args()
 
-    with open(os.path.join(args.config, config_filename), "rb") as f:
-        config = tomllib.load(f)
+    with open(os.path.join(args.config, config_filepath), "rb") as f:
+        config = DEFAULT_CONFIG | tomllib.load(f)
 
-    logging.basicConfig(filename=log_filename, format=LOG_FORMAT, level=args.loglevel.upper())
-    logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
+    logging.basicConfig(
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.handlers.RotatingFileHandler(
+                log_filepath,
+                mode='a',
+                maxBytes=config["logging"]["file_size"],
+                backupCount=config["logging"]["max_files"]),
+        ],
+        level=(args.loglevel if args.loglevel else config["logging"]["level"]).upper(),
+        format=LOG_FORMAT)
+
+    for folder_path in config["include_folders"]:
+        if not os.path.isdir(folder_path):
+            logging.error(f"Include folder does not exist: {folder_path}")
+            return
 
     try:
         image_queue = queue.Queue()
@@ -235,18 +268,6 @@ def main():
 
     except Exception as e:
         logging.error(e)
-
-MODEL_PATH="classifiers/JTP-3/jtp-3-hydra.safetensors"
-LOG_FORMAT = '%(asctime)s %(levelname)s: %(message)s'
-
-config = {
-    "delay_seconds": 1,
-    "score_cutoff": 0.30,
-    "classified_tag": 'e621-jtp3',
-    "include_folders": [ "D:/Downloads/yiffy" ],
-    "include_patterns": ['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.webp'],
-    "exclude_patterns": []
-}
 
 if __name__ == '__main__':
     main()
