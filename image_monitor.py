@@ -1,14 +1,16 @@
-import time
-import threading
-import queue
-import torch 
-import heapdict
-import os
-import subprocess
-import logging
-import traceback
 import argparse
+import logging
+import os
+import queue
+import subprocess
 import sys
+import threading
+import time
+import traceback
+import __main__
+
+import heapdict
+import torch
 
 from watchdog.events import FileSystemEvent, PatternMatchingEventHandler
 from watchdog.observers import Observer
@@ -24,6 +26,7 @@ except ModuleNotFoundError:
 
 MODEL_PATH="classifiers/JTP-3/jtp-3-hydra.safetensors"
 LOG_FORMAT = '%(asctime)s %(levelname)s: %(message)s'
+INTERNAL_THRESHOLD = 0.01
 
 DEFAULT_CONFIG = {
     "delay_seconds": 1,
@@ -47,11 +50,11 @@ class MonitorEventHandler(PatternMatchingEventHandler):
         self.image_queue = image_queue
 
     def on_created(self, event: FileSystemEvent) -> None:
-        logging.debug(f'Event: image created: queuing {event.src_path}')
+        logging.debug('Event: image created: queuing %s', event.src_path)
         self.image_queue.put((event.src_path, time.time(), "created"))
 
     def on_modified(self, event: FileSystemEvent) -> None:
-        logging.debug(f'Event: image modified: queueing {event.src_path}')
+        logging.debug('Event: image modified: queueing %s', event.src_path)
         self.image_queue.put((event.src_path, time.time(), "modified"))
 
 class Classifier:
@@ -69,15 +72,13 @@ class Classifier:
         )
         logging.debug("Loaded JTP-3 inference module.")
 
-    def classify_image(self, image_path, score_cutoff):
-        logging.debug(f"Loading and preprocessing image {image_path}...")
+    def preprocess(self, image_path):
         start_preprocess = time.time()
         patches, coords, valid = preprocess_jtp3(image_path)
-        end_preprocess = time.time()
-        logging.debug(f"Preprocessing took {end_preprocess - start_preprocess:.3f} seconds.")
+        time_preprocess = time.time() - start_preprocess
+        return time_preprocess, patches, coords, valid
 
-        # --- Run Inference using provided function ---
-        logging.debug("Running JTP-3 inference...")
+    def infer(self, patches, coords, valid):
         start_inference = time.time()
         probabilities = run_inference_jtp3(
             model=self.model,
@@ -86,12 +87,14 @@ class Classifier:
             valid=valid,
             device=self.device
         )
-        end_inference = time.time()
+        time_inference = time.time() - start_inference
+        return time_inference, probabilities
 
-        logging.debug("Post-processing results...")
+    def postprocess(self, probabilities, score_cutoff):
         # 1. Thresholding (find indices above threshold)
-        probabilities_cpu = probabilities.cpu()  # Move to CPU for thresholding/indexing
-        INTERNAL_THRESHOLD = 0.01  # Filter out only extremely unlikely tags
+        # Move to CPU for thresholding/indexing
+        probabilities_cpu = probabilities.cpu()
+        # Filter out only extremely unlikely tags
         indices = torch.where(probabilities_cpu > INTERNAL_THRESHOLD)[0]
         values = probabilities_cpu[indices]
 
@@ -105,21 +108,31 @@ class Classifier:
                 if score >= score_cutoff:
                     results.append((tag_name, score))
             else:
-                logging.warning(f"Warning: Index {tag_index} out of bounds for allowed tags.")
+                logging.warning("Warning: Index %s out of bounds for allowed tags.", tag_index)
 
         # 3. Sort by score (descending)
         results.sort(key=lambda x: x[1], reverse=True)
-        logging.debug(f"Found {len(results)} tags above INTERNAL threshold {INTERNAL_THRESHOLD} and with a score above {score_cutoff}.")
-        return [result[0] for result in results], end_preprocess - start_preprocess, end_inference - start_inference
+        return results
+
+    def classify_image(self, image_path, score_cutoff):
+        logging.debug("Loading and preprocessing image %s...", image_path)
+        time_preprocess, patches, coords, valid = self.preprocess(image_path)
+        logging.debug("Running JTP-3 inference...")
+        time_inference, probabilities = self.infer(patches, coords, valid)
+        logging.debug("Post-processing results...")
+        results = self.postprocess(probabilities, score_cutoff)
+        logging.debug("Found %d tags above INTERNAL threshold %.2f and with a score above %.2f.",
+            len(results), INTERNAL_THRESHOLD, score_cutoff)
+        return [result[0] for result in results], time_preprocess, time_inference
 
 class DelayQueue:
-    def __init__(self, queue):
-        self.queue = queue
+    def __init__(self, input_queue):
+        self.input_queue = input_queue
         self.delay_queue = heapdict.heapdict()
         self.delay_info = {}
 
     def dequeue(self):
-        entry = self.queue.get()
+        entry = self.input_queue.get()
         if entry is None:
             return False
         (item, timestamp, info) = entry
@@ -128,7 +141,7 @@ class DelayQueue:
         return True
 
     def update(self) -> bool:
-        while not self.queue.empty():
+        while not self.input_queue.empty():
             if not self.dequeue():
                 return False
         if len(self.delay_queue) == 0:
@@ -144,10 +157,10 @@ class DelayQueue:
         (item, timestamp) = self.delay_queue.popitem()
         return item, timestamp, self.delay_info.pop(item)
 
-def run_command(args, input=None) -> bool:
+def run_command(args, input_buffer=None) -> bool:
     process = subprocess.run(
         args,
-        input=input,
+        input=input_buffer,
         encoding='utf-8',
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -155,11 +168,11 @@ def run_command(args, input=None) -> bool:
     return process.returncode, process.stdout.strip(), process.stderr.strip()
 
 def check_has_xmp_tag(image_path, tag):
-    return_code, stdout, stderr = run_command(['exiv2', '-px', 'pr', image_path])
+    _, stdout, stderr = run_command(['exiv2', '-px', 'pr', image_path])
     for error in stderr.splitlines():
-        logging.warning(f'{error} (while checking tags on: {image_path})')
+        logging.warning('%s (while checking tags on: %s)', error, image_path)
     has_tag = tag in stdout
-    logging.debug(f'{"Has" if has_tag else "Missing"} JTP-3 tag: {image_path}')
+    logging.debug('%s JTP-3 tag: %s', "Has" if has_tag else "Missing", image_path)
     return has_tag
 
 def write_xmp_tags(image_path, tags):
@@ -168,10 +181,12 @@ def write_xmp_tags(image_path, tags):
         modified_time = os.path.getmtime(image_path)
         keywords = [tag.replace('_', ' ') for tag in tags]
         keywords_buffer = '\n'.join([f'set Xmp.dc.subject {kw}' for kw in keywords])
-        return_code, stdout, stderr = run_command(['exiv2', '-m-', image_path], input=keywords_buffer)
+        _, _, stderr = run_command(
+            ['exiv2', '-m-', image_path],
+            input_buffer=keywords_buffer)
         for error in stderr.splitlines():
-            logging.warning(f'{error} (while setting tags on: {image_path})')
-        logging.debug(f"Wrote XMP keywords to: {image_path}")
+            logging.warning("%s (while setting tags on: %s)", error, image_path)
+        logging.debug("Wrote XMP keywords to: %s", image_path)
         access_time = os.path.getatime(image_path)
         os.utime(image_path, times=(access_time, modified_time))
 
@@ -187,31 +202,41 @@ def image_processor(image_queue):
             time.sleep(config["delay_seconds"] - time_delay)
         else:
             image_path, timestamp, event = delay_queue.pop()
-            logging.debug(f'Checking {image_path}...')
+            logging.debug("Checking %s...", image_path)
 
             try:
                 start_job = time.time()
                 if not check_has_xmp_tag(image_path, config["classified_tag"]):
-                    tags, time_preprocess, time_inference = classifier.classify_image(image_path, config["score_cutoff"])
+                    tags, time_preprocess, time_inference = \
+                        classifier.classify_image(image_path, config["score_cutoff"])
                     tags.append(config["classified_tag"])
                     write_xmp_tags(image_path, tags)
                     time_job = time.time() - start_job
-                    logging.info(f'{event:8} {time_delay:.2f}s {time_preprocess:.2f}s {time_inference:.2f}s {time_job:.2f}s {len(tags):3} {image_path}')
+                    logging.info("%8s %.2fs %.2fs (%.2fs %.2fs) %3d %s",
+                        event, time_delay, time_job, time_preprocess, time_inference,
+                        len(tags), image_path)
 
             except subprocess.CalledProcessError as e:
-                logging.error(f"Called process '{' '.join(e.cmd)}' failed: {e.stderr.strip()} (return code: {e.returncode})")
+                logging.error("Called process '%s' failed: %s (return code: %d)",
+                    ' '.join(e.cmd), e.stderr.strip(), e.returncode)
 
             except Exception as e:
-                logging.error(f"Image processing failed: {e} ({image_path})")
-                logging.debug(f"Stack trace:\n{traceback.format_exc().strip()}")
+                logging.error("Image processing failed: %s (%s)", e, image_path)
+                logging.debug("Stack trace:\n%s", traceback.format_exc().strip())
 
 def main():
-    import __main__
+    global config
     config_filepath = os.path.splitext(__main__.__file__)[0] + '.toml'
     log_filepath = os.path.splitext(__main__.__file__)[0] + '.log'
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default='.', help=f"path to the {os.path.basename(config_filepath)} file.")
-    parser.add_argument("--loglevel", choices=["debug", "info", "warning", "error"], help="minimum level of messages to log")
+    parser.add_argument(
+        "--config",
+        default='.',
+        help=f"path to the {os.path.basename(config_filepath)} file.")
+    parser.add_argument(
+        "--loglevel",
+        choices=["debug", "info", "warning", "error"],
+        help="minimum level of messages to log")
     args = parser.parse_args()
 
     with open(os.path.join(args.config, config_filepath), "rb") as f:
@@ -231,7 +256,7 @@ def main():
 
     for folder_path in config["include_folders"]:
         if not os.path.isdir(folder_path):
-            logging.error(f"Include folder does not exist: {folder_path}")
+            logging.error("Include folder does not exist: %s", folder_path)
             return
 
     try:
@@ -254,7 +279,7 @@ def main():
             while True:
                 time.sleep(1)
 
-        except KeyboardInterrupt as e:
+        except KeyboardInterrupt:
             logging.info("Process aborted at keyboard!")
 
         except Exception as e:
