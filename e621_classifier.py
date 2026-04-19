@@ -1,4 +1,3 @@
-import argparse
 import logging
 import os
 import queue
@@ -24,7 +23,7 @@ try:
 except ModuleNotFoundError:
     import tomli as tomllib  # Python 3.10
 
-MODEL_PATH="classifiers/JTP-3/jtp-3-hydra.safetensors"
+MODEL_PATH = "classifiers/JTP-3/jtp-3-hydra.safetensors"
 LOG_FORMAT = '%(asctime)s %(levelname)s: %(message)s'
 INTERNAL_THRESHOLD = 0.01
 
@@ -224,75 +223,67 @@ def image_processor(image_queue):
                 logging.error("Image processing failed: %s (%s)", e, image_path)
                 logging.debug("Stack trace:\n%s", traceback.format_exc().strip())
 
-def main():
-    global config
-    config_filepath = os.path.splitext(__main__.__file__)[0] + '.toml'
-    log_filepath = os.path.splitext(__main__.__file__)[0] + '.log'
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--config",
-        default='.',
-        help=f"path to the {os.path.basename(config_filepath)} file.")
-    parser.add_argument(
-        "--loglevel",
-        choices=["debug", "info", "warning", "error"],
-        help="minimum level of messages to log")
-    args = parser.parse_args()
+class Application:
+    def __init__(self):
+        path = os.path.split(__main__.__file__)[0]
+        self.config_filepath = os.path.join(path, os.path.splitext(__name__)[0] + '.toml')
+        self.log_filepath = os.path.join(path, os.path.splitext(__name__)[0] + '.log')
+        self.log_level = None
 
-    with open(os.path.join(args.config, config_filepath), "rb") as f:
-        config = DEFAULT_CONFIG | tomllib.load(f)
+    def get_config_filename(self):
+        return os.path.basename(self.config_filepath)
 
-    logging.basicConfig(
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.handlers.RotatingFileHandler(
-                log_filepath,
-                mode='a',
-                maxBytes=config["logging"]["file_size"],
-                backupCount=config["logging"]["max_files"]),
-        ],
-        level=(args.loglevel if args.loglevel else config["logging"]["level"]).upper(),
-        format=LOG_FORMAT)
+    def set_config_path(self, config_path):
+        self.config_filepath = os.path.join(config_path, os.path.basename(self.config_filepath))
 
-    for folder_path in config["include_folders"]:
-        if not os.path.isdir(folder_path):
-            logging.error("Include folder does not exist: %s", folder_path)
-            return
+    def set_log_level(self, log_level):
+        self.log_level = log_level
 
-    try:
-        image_queue = queue.Queue()
-        worker_thread = threading.Thread(target=image_processor, args=(image_queue,))
-        worker_thread.start()
+    def start(self, log_level=None):
+        global config
+        with open(self.config_filepath, "rb") as f:
+            config = DEFAULT_CONFIG | tomllib.load(f)
 
-        observer = Observer()
-        for folder in config["include_folders"]:
-            event_handler = MonitorEventHandler(
-                image_queue,
-                patterns=config["include_patterns"],
-                ignore_patterns=config["exclude_patterns"],
-                ignore_directories=True,
-                case_sensitive=False)
-            observer.schedule(event_handler, folder, recursive=True)
-        observer.start()
+        logging.basicConfig(
+            handlers=[
+                logging.StreamHandler(sys.stdout),
+                logging.handlers.RotatingFileHandler(
+                    self.log_filepath,
+                    mode='a',
+                    maxBytes=config["logging"]["file_size"],
+                    backupCount=config["logging"]["max_files"]),
+            ],
+            level=(self.log_level if self.log_level else config["logging"]["level"]).upper(),
+            format=LOG_FORMAT)
+
+        for folder_path in config["include_folders"]:
+            if not os.path.isdir(folder_path):
+                logging.error("Include folder does not exist: %s", folder_path)
+                return False
 
         try:
-            while True:
-                time.sleep(1)
+            self.image_queue = queue.Queue()
+            self.worker_thread = threading.Thread(target=image_processor, args=(self.image_queue,))
+            self.worker_thread.start()
 
-        except KeyboardInterrupt:
-            logging.info("Process aborted at keyboard!")
+            self.observer = Observer()
+            for folder in config["include_folders"]:
+                event_handler = MonitorEventHandler(
+                    self.image_queue,
+                    patterns=config["include_patterns"],
+                    ignore_patterns=config["exclude_patterns"],
+                    ignore_directories=True,
+                    case_sensitive=False)
+                self.observer.schedule(event_handler, folder, recursive=True)
+            self.observer.start()
 
         except Exception as e:
             logging.error(e)
 
-        finally:
-            observer.stop()
-            observer.join()
-            image_queue.put(None)
-            worker_thread.join()
+        return True
 
-    except Exception as e:
-        logging.error(e)
-
-if __name__ == '__main__':
-    main()
+    def stop(self):
+        self.observer.stop()
+        self.observer.join()
+        self.image_queue.put(None)
+        self.worker_thread.join()

@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['e621_classifier.py'],
+    ['e621_service.py'],
     pathex=[],
     binaries=[
         ("exiv2.exe", "."),
@@ -12,7 +12,9 @@ a = Analysis(
         ("e621_classifier.toml", "."),
         ("classifiers/JTP-3/jtp-3-hydra.safetensors", "classifiers/JTP-3"),
     ],
-    hiddenimports=[],
+    hiddenimports=[
+        "win32timezone"
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -27,7 +29,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='e621_classifier',
+    name='e621_service',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -47,5 +49,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='e621_classifier',
+    name='e621_service',
 )
