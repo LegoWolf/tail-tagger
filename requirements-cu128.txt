@@ -13,3 +13,4 @@ watchdog>=6.0.0
 heapdict>=1.0.0
 pywin32>=311
 concurrent-log-handler>=0.9.0
+pyinstaller
