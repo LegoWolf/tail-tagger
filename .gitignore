@@ -32,3 +32,12 @@ classifiers/*/overrides.toml
 
 # Claude Files
 .claude/
+
+# PyInstaller build files
+build/
+dist/
+
+# Exiv2 utility.
+exiv2.dll
+exiv2.exe
+exiv2
