@@ -7,7 +7,8 @@ import threading
 import time
 import traceback
 import __main__
-
+ 
+import concurrent_log_handler
 import heapdict
 import torch
 
@@ -247,11 +248,12 @@ class Application:
         logging.basicConfig(
             handlers=[
                 logging.StreamHandler(sys.stdout),
-                logging.handlers.RotatingFileHandler(
+                concurrent_log_handler.ConcurrentRotatingFileHandler(
                     self.log_filepath,
                     mode='a',
                     maxBytes=config["logging"]["file_size"],
-                    backupCount=config["logging"]["max_files"]),
+                    backupCount=config["logging"]["max_files"],
+                    use_gzip=True),
             ],
             level=(self.log_level if self.log_level else config["logging"]["level"]).upper(),
             format=LOG_FORMAT)
