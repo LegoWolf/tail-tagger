@@ -21,6 +21,7 @@ include_patterns = [
 
 exclude_patterns = [
 	# "D:\\Downloads\\yiffy\\Folder 1\\Ignore\\**\\*",
+	# "/Users/falkner/Downloads/yiffy/ignore/**",
 ]
 
 [logging]

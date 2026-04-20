@@ -1,5 +1,6 @@
 import logging
 import os
+import pathlib
 import queue
 import subprocess
 import sys
@@ -240,6 +241,18 @@ class Application:
     def set_log_level(self, log_level):
         self.log_level = log_level
 
+    def walk_folders(self):
+        for include_folder in config["include_folders"]:
+            for root, dirs, files in os.walk(include_folder):
+                logging.debug("Walk: %s, %s, %s", root, dirs, files)
+                for file in files:
+                    path = pathlib.Path(os.path.join(root, file))
+                    include_match = any([path.match(pattern) for pattern in config["include_patterns"]])
+                    exclude_match = any([path.match(pattern) for pattern in config["exclude_patterns"]])
+                    if include_match and not exclude_match:
+                        logging.debug("Found: %s", path)
+                        self.image_queue.put((path, time.time(), "existing"))
+
     def start(self, log_level=None):
         global config
         with open(self.config_filepath, "rb") as f:
@@ -282,6 +295,7 @@ class Application:
                     case_sensitive=False)
                 self.observer.schedule(event_handler, folder, recursive=True)
             self.observer.start()
+            self.walk_folders()
 
         except Exception as e:
             logging.error(e)
