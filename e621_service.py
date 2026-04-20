@@ -17,9 +17,6 @@ class ClassifierService:
         """Main service loop. This is where work is done!"""
         self.running = True
 
-        # TODO: Get rid of this hard-coded folder.
-        os.chdir("C:\\ProgramData\\e621 Classifier")
-
         app = e621_classifier.Application()
         if app.start():
             logging.info("Service started.")

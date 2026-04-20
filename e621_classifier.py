@@ -226,9 +226,9 @@ def image_processor(image_queue):
 
 class Application:
     def __init__(self):
-        path = os.path.split(__main__.__file__)[0]
-        self.config_filepath = os.path.join(path, os.path.splitext(__name__)[0] + '.toml')
-        self.log_filepath = os.path.join(path, os.path.splitext(__name__)[0] + '.log')
+        self.executable_path = os.path.split(__main__.__file__)[0]
+        self.config_filepath = os.path.join(self.executable_path, os.path.splitext(__name__)[0] + '.toml')
+        self.log_filepath = os.path.join(self.executable_path, os.path.splitext(__name__)[0] + '.log')
         self.log_level = None
 
     def get_config_filename(self):
@@ -262,6 +262,10 @@ class Application:
             if not os.path.isdir(folder_path):
                 logging.error("Include folder does not exist: %s", folder_path)
                 return False
+
+        # TODO: Get rid of this hard-coded folder.
+        os.chdir(self.executable_path) 
+        logging.debug("Working directory: %s", os.getcwd())
 
         try:
             self.image_queue = queue.Queue()
