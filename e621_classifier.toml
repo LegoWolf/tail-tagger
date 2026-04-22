@@ -1,8 +1,11 @@
 delay_seconds = 1
+ignore_seconds = 2
 score_cutoff = 0.30
 classified_tag = 'e621-jtp3'
 include_folders = [
 	"D:\\Shared\\Archived\\Media\\Images\\Yiffy\\Furry\\Glyn\\TagTest",
+	# "C:\\Users\\falkn\\Downloads\\yiffy\\Folder 1",
+	# "C:\\Users\\falkn\\Downloads\\yiffy\\Folder 2",
 	# "D:\\Downloads\\yiffy\\Folder 1",
 	# "D:\\Downloads\\yiffy\\Folder 2",
 	# "/Users/falkner/Downloads/yiffy",
@@ -20,8 +23,14 @@ include_patterns = [
 ]
 
 exclude_patterns = [
+	"D:\\Shared\\Archived\\Media\\Images\\Yiffy\\Furry\\Glyn\\TagTest\\Ignore\\*",
+	"D:\\Shared\\Archived\\Media\\Images\\Yiffy\\Furry\\Glyn\\TagTest\\Ignore\\**\\*",
+	# "C:\\Users\\falkn\\Downloads\\yiffy\\Folder 1\\Ignore\\*",
+	# "C:\\Users\\falkn\\Downloads\\yiffy\\Folder 1\\Ignore\\**\\*",
+	# "D:\\Downloads\\yiffy\\Folder 1\\Ignore\\*",
 	# "D:\\Downloads\\yiffy\\Folder 1\\Ignore\\**\\*",
-	# "/Users/falkner/Downloads/yiffy/ignore/**",
+	# "/Users/falkner/Downloads/yiffy/ignore/**/*",
+	# "/Users/falkner/Downloads/yiffy/ignore/*",
 ]
 
 [logging]

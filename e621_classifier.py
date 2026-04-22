@@ -31,6 +31,7 @@ INTERNAL_THRESHOLD = 0.01
 
 DEFAULT_CONFIG = {
     "delay_seconds": 1,
+    "ignore_seconds": 1,
     "score_cutoff": 0.30,
     "classified_tag": 'e621-jtp3',
     "include_folders": [ "D:/Downloads/yiffy" ],
@@ -141,11 +142,16 @@ class DelayQueue:
         self.delay_info[item] = info
         return True
 
-    def update(self) -> bool:
+    def update(self, latent_entries=None) -> bool:
         while not self.input_queue.empty():
             if not self.dequeue():
                 return False
         if len(self.delay_queue) == 0:
+            if latent_entries is not None and len(latent_entries) > 0:
+                (item, timestamp, info) = latent_entries.pop()
+                self.delay_queue[item] = timestamp
+                self.delay_info[item] = info
+                return True
             if not self.dequeue():
                 return False
         return True
@@ -157,6 +163,28 @@ class DelayQueue:
     def pop(self):
         (item, timestamp) = self.delay_queue.popitem()
         return item, timestamp, self.delay_info.pop(item)
+
+class TemporarySet:
+    def __init__(self):
+        self.heap = heapdict.heapdict()
+
+    def add(self, item, until):
+        logging.debug("Adding %.0f %s (%s)", until, item, type(item))
+        self.heap[item] = until
+        logging.debug("Adding Check: %.0f %s", self.heap.get(item), item)
+
+    def check(self, item, now):
+        until = self.heap.get(item)
+        logging.debug("Ignore %s %s %s (%s)", until, now, item, type(item))
+        return until is not None and until < now
+
+    def drain(self, before):
+        while len(self.heap) > 0:
+            _, until = self.heap.peekitem()
+            if until < before:
+                self.heap.popitem()
+            else:
+                break
 
 def run_command(args, input_buffer=None) -> bool:
     process = subprocess.run(
@@ -191,22 +219,49 @@ def write_xmp_tags(image_path, tags):
         access_time = os.path.getatime(image_path)
         os.utime(image_path, times=(access_time, modified_time))
 
+def get_walk_entries():
+    walk_entries = []
+    for include_folder in config["include_folders"]:
+        for root, dirs, files in os.walk(include_folder):
+            logging.debug("Complete walk: %s (%d files)", root, len(files))
+            for file in files:
+                filepath = pathlib.Path(os.path.join(root, file))
+                include_match = any([filepath.match(pattern) for pattern in config["include_patterns"]])
+                exclude_match = any([filepath.match(pattern) for pattern in config["exclude_patterns"]])
+                if include_match and not exclude_match: 
+                    walk_entries.append((filepath, os.path.getmtime(filepath), "walked"))
+    logging.debug("Filtered walk: %s files", len(walk_entries))
+    walk_entries.sort(key=lambda entry: entry[1])
+    return walk_entries
+
 def image_processor(image_queue):
     delay_queue = DelayQueue(image_queue)
-    classifier = Classifier(model_path=MODEL_PATH)
+    classifier = Classifier(model_path=MODEL_PATH) 
+    ignore_set = TemporarySet()
+    start_walk = time.time()
+    walk_entries = get_walk_entries()
+    walking = True
 
-    while delay_queue.update():
+    while delay_queue.update(walk_entries):
+        if walking and len(walk_entries) == 0:
+            logging.info("Finished processing existing files from a recursive walk. (%.2f)",
+                time.time() - start_walk)
+            walking = False
+
         image_path, timestamp, event = delay_queue.peek()
-        time_delay = time.time() - timestamp
+        start_job = time.time()
+        time_delay = start_job - timestamp
+        ignore_set.drain(timestamp)
 
-        if time_delay < config["delay_seconds"]:
+        if ignore_set.check(str(image_path), timestamp):
+            delay_queue.pop()
+        elif time_delay < config["delay_seconds"]:
             time.sleep(config["delay_seconds"] - time_delay)
         else:
             image_path, timestamp, event = delay_queue.pop()
             logging.debug("Checking %s...", image_path)
 
             try:
-                start_job = time.time()
                 if not check_has_xmp_tag(image_path, config["classified_tag"]):
                     tags, time_preprocess, time_inference = \
                         classifier.classify_image(image_path, config["score_cutoff"])
@@ -216,6 +271,7 @@ def image_processor(image_queue):
                     logging.info("%8s %.2fs %.2fs (%.2fs %.2fs) %3d %s",
                         event, time_delay, time_job, time_preprocess, time_inference,
                         len(tags), image_path)
+                ignore_set.add(str(image_path), time.time() + config["ignore_seconds"])
 
             except subprocess.CalledProcessError as e:
                 logging.error("Called process '%s' failed: %s (return code: %d)",
@@ -240,18 +296,6 @@ class Application:
 
     def set_log_level(self, log_level):
         self.log_level = log_level
-
-    def walk_folders(self):
-        for include_folder in config["include_folders"]:
-            for root, dirs, files in os.walk(include_folder):
-                logging.debug("Walk: %s, %s, %s", root, dirs, files)
-                for file in files:
-                    path = pathlib.Path(os.path.join(root, file))
-                    include_match = any([path.match(pattern) for pattern in config["include_patterns"]])
-                    exclude_match = any([path.match(pattern) for pattern in config["exclude_patterns"]])
-                    if include_match and not exclude_match:
-                        logging.debug("Found: %s", path)
-                        self.image_queue.put((path, time.time(), "existing"))
 
     def start(self, log_level=None):
         global config
@@ -295,7 +339,6 @@ class Application:
                     case_sensitive=False)
                 self.observer.schedule(event_handler, folder, recursive=True)
             self.observer.start()
-            self.walk_folders()
 
         except Exception as e:
             logging.error(e)
