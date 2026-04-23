@@ -245,7 +245,7 @@ def image_processor(image_queue):
 
     while delay_queue.update(walk_entries):
         if walking and len(walk_entries) == 0:
-            logging.info("Finished processing existing files from a recursive walk. (%.2f)",
+            logging.info("Finished processing existing files from a recursive walk. (%.2fs)",
                 time.time() - start_walk)
             walking = False
 
