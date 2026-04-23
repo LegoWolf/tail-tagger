@@ -237,7 +237,7 @@ def get_walk_entries():
 
 def image_processor(image_queue):
     delay_queue = DelayQueue(image_queue)
-    classifier = Classifier(model_path=MODEL_PATH) 
+    classifier = Classifier(model_path=MODEL_PATH)
     ignore_set = TemporarySet()
     start_walk = time.time()
     walk_entries = get_walk_entries()
@@ -245,8 +245,9 @@ def image_processor(image_queue):
 
     while delay_queue.update(walk_entries):
         if walking and len(walk_entries) == 0:
-            logging.info("Finished processing existing files from a recursive walk. (%.2fs)",
-                time.time() - start_walk)
+            time_walk = time.time() - start_walk
+            logging.info("Finished processing existing files from a recursive walk. (%dm %ds)",
+                time_walk / 60, int(time_walk) % 60)
             walking = False
 
         image_path, timestamp, event = delay_queue.peek()
