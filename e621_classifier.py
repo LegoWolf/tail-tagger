@@ -169,14 +169,11 @@ class TemporarySet:
         self.heap = heapdict.heapdict()
 
     def add(self, item, until):
-        logging.debug("Adding %.0f %s (%s)", until, item, type(item))
         self.heap[item] = until
-        logging.debug("Adding Check: %.0f %s", self.heap.get(item), item)
 
     def check(self, item, now):
         until = self.heap.get(item)
-        logging.debug("Ignore %s %s %s (%s)", until, now, item, type(item))
-        return until is not None and until < now
+        return until is not None and now < until 
 
     def drain(self, before):
         while len(self.heap) > 0:
@@ -197,14 +194,17 @@ def run_command(args, input_buffer=None) -> bool:
     return process.returncode, process.stdout.strip(), process.stderr.strip()
 
 def check_has_xmp_tag(image_path, tag):
+    start_check = time.time()
     _, stdout, stderr = run_command(['exiv2', '-px', 'pr', image_path])
     for error in stderr.splitlines():
         logging.warning('%s (while checking tags on: %s)', error, image_path)
     has_tag = tag in stdout
-    logging.debug('%s JTP-3 tag: %s', "Has" if has_tag else "Missing", image_path)
-    return has_tag
+    time_check = time.time() - start_check
+    logging.debug('%s JTP-3 tag: %s (%.2fs)', "Has" if has_tag else "Missing", image_path, time_check)
+    return has_tag, time_check
 
 def write_xmp_tags(image_path, tags):
+    start_write = time.time()
     if len(tags) > 0:
         # Preserve the current modified time.
         modified_time = os.path.getmtime(image_path)
@@ -218,6 +218,7 @@ def write_xmp_tags(image_path, tags):
         logging.debug("Wrote XMP keywords to: %s", image_path)
         access_time = os.path.getatime(image_path)
         os.utime(image_path, times=(access_time, modified_time))
+    return time.time() - start_write
 
 def get_walk_entries():
     walk_entries = []
@@ -262,15 +263,16 @@ def image_processor(image_queue):
             logging.debug("Checking %s...", image_path)
 
             try:
-                if not check_has_xmp_tag(image_path, config["classified_tag"]):
+                has_tag, time_check = check_has_xmp_tag(image_path, config["classified_tag"])
+                if not has_tag:
                     tags, time_preprocess, time_inference = \
                         classifier.classify_image(image_path, config["score_cutoff"])
                     tags.append(config["classified_tag"])
-                    write_xmp_tags(image_path, tags)
+                    time_write = write_xmp_tags(image_path, tags)
                     time_job = time.time() - start_job
-                    logging.info("%8s %.2fs %.2fs (%.2fs %.2fs) %3d %s",
-                        event, time_delay, time_job, time_preprocess, time_inference,
-                        len(tags), image_path)
+                    logging.info("%8s %.2fs %.2fs (%.2fs %.2fs %.2fs %.2fs) %3d %s",
+                        event, time_delay, time_job, time_check, time_preprocess,
+                        time_inference, time_write, len(tags), image_path)
                 ignore_set.add(str(image_path), time.time() + config["ignore_seconds"])
 
             except subprocess.CalledProcessError as e:

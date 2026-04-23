@@ -1,5 +1,5 @@
 delay_seconds = 1
-ignore_seconds = 2
+ignore_seconds = 1
 score_cutoff = 0.30
 classified_tag = 'e621-jtp3'
 include_folders = [
@@ -35,5 +35,5 @@ exclude_patterns = [
 
 [logging]
 level = "info"
-file_size = 1048576
+file_size = 10485760
 max_files = 10
