@@ -1,7 +1,8 @@
 delay_seconds = 1
 ignore_seconds = 1
 score_cutoff = 0.30
-classified_tag = 'e621-jtp3'
+classified_tag_model = 'e621-model-{0}'
+classified_tag_score = 'e621-score-{0}'
 include_folders = [
 	"D:\\Shared\\Archived\\Media\\Images\\Yiffy\\Furry\\Glyn\\TagTest",
 	# "C:\\Users\\falkn\\Downloads\\yiffy\\Folder 1",
