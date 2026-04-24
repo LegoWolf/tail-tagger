@@ -33,7 +33,8 @@ DEFAULT_CONFIG = {
     "delay_seconds": 1,
     "ignore_seconds": 1,
     "score_cutoff": 0.30,
-    "classified_tag": 'e621-jtp3',
+    "classified_tag_model": 'e621-model-{0}',
+    "classified_tag_score": 'e621-score-{0}',
     "include_folders": [ "D:/Downloads/yiffy" ],
     "include_patterns": ['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.webp'],
     "exclude_patterns": [],
@@ -254,6 +255,8 @@ def image_processor(image_queue):
     walk_entries = FolderWalkEntries()
     delay_queue = DelayQueue(image_queue, walk_entries)
     ignore_set = TemporarySet()
+    tag_model = config["classified_tag_model"].format("jtp3")
+    tag_score = config["classified_tag_score"].format(f"{config['score_cutoff']:.4f}")
 
     while delay_queue.update():
         image_path, timestamp, event = delay_queue.peek()
@@ -270,11 +273,11 @@ def image_processor(image_queue):
             logging.debug("Checking %s...", image_path)
 
             try:
-                has_tag, time_check = check_has_xmp_tag(image_path, config["classified_tag"])
+                has_tag, time_check = check_has_xmp_tag(image_path, tag_model)
                 if not has_tag:
                     tags, time_preprocess, time_inference = \
                         classifier.classify_image(image_path, config["score_cutoff"])
-                    tags.append(config["classified_tag"])
+                    tags.extend([tag_model, tag_score])
                     time_write = write_xmp_tags(image_path, tags)
                     time_job = time.time() - start_job
                     logging.info("%8s %.2fs %.2fs (%.2fs %.2fs %.2fs %.2fs) %3d %s",
