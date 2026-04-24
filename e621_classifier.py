@@ -329,7 +329,6 @@ class Application:
                 logging.error("Include folder does not exist: %s", folder_path)
                 return False
 
-        # TODO: Get rid of this hard-coded folder.
         os.chdir(self.executable_path) 
         logging.debug("Working directory: %s", os.getcwd())
 
