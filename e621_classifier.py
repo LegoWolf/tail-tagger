@@ -127,11 +127,40 @@ class Classifier:
             len(results), INTERNAL_THRESHOLD, score_cutoff)
         return [result[0] for result in results], time_preprocess, time_inference
 
+class FolderWalkEntries:
+    def __init__(self):
+        self.start_walk = time.time()
+        self.entries = []
+        for folder in config["include_folders"]:
+            for root, dirs, files in os.walk(folder):
+                logging.debug("Complete walk: %s (%d files)", root, len(files))
+                for file in files:
+                    filepath = pathlib.Path(os.path.join(root, file))
+                    include_match = any((filepath.match(pattern) for pattern in config["include_patterns"]))
+                    exclude_match = any((filepath.match(pattern) for pattern in config["exclude_patterns"]))
+                    if include_match and not exclude_match: 
+                        self.entries.append((filepath, os.path.getmtime(filepath), "walked"))
+        logging.debug("Filtered walk: %s files", len(self.entries))
+        self.entries.sort(key=lambda entry: entry[1])
+
+    def __len__(self):
+        return len(self.entries)
+
+    def __next__(self):
+        if len(self.entries) == 0:
+            raise StopIteration
+        if len(self.entries) == 1:
+            time_walk = time.time() - self.start_walk
+            logging.info("Finished processing existing files from a recursive walk. (%dm %ds)",
+                time_walk / 60, int(time_walk) % 60)
+        return self.entries.pop()
+
 class DelayQueue:
-    def __init__(self, input_queue):
+    def __init__(self, input_queue, latent_entries=None):
         self.input_queue = input_queue
         self.delay_queue = heapdict.heapdict()
         self.delay_info = {}
+        self.latent_entries = latent_entries
 
     def dequeue(self):
         entry = self.input_queue.get()
@@ -142,13 +171,13 @@ class DelayQueue:
         self.delay_info[item] = info
         return True
 
-    def update(self, latent_entries=None) -> bool:
+    def update(self) -> bool:
         while not self.input_queue.empty():
             if not self.dequeue():
                 return False
         if len(self.delay_queue) == 0:
-            if latent_entries is not None and len(latent_entries) > 0:
-                (item, timestamp, info) = latent_entries.pop()
+            if self.latent_entries is not None and len(self.latent_entries) > 0:
+                (item, timestamp, info) = next(self.latent_entries)
                 self.delay_queue[item] = timestamp
                 self.delay_info[item] = info
                 return True
@@ -220,36 +249,13 @@ def write_xmp_tags(image_path, tags):
         os.utime(image_path, times=(access_time, modified_time))
     return time.time() - start_write
 
-def get_walk_entries():
-    walk_entries = []
-    for include_folder in config["include_folders"]:
-        for root, dirs, files in os.walk(include_folder):
-            logging.debug("Complete walk: %s (%d files)", root, len(files))
-            for file in files:
-                filepath = pathlib.Path(os.path.join(root, file))
-                include_match = any([filepath.match(pattern) for pattern in config["include_patterns"]])
-                exclude_match = any([filepath.match(pattern) for pattern in config["exclude_patterns"]])
-                if include_match and not exclude_match: 
-                    walk_entries.append((filepath, os.path.getmtime(filepath), "walked"))
-    logging.debug("Filtered walk: %s files", len(walk_entries))
-    walk_entries.sort(key=lambda entry: entry[1])
-    return walk_entries
-
 def image_processor(image_queue):
-    delay_queue = DelayQueue(image_queue)
     classifier = Classifier(model_path=MODEL_PATH)
+    walk_entries = FolderWalkEntries()
+    delay_queue = DelayQueue(image_queue, walk_entries)
     ignore_set = TemporarySet()
-    start_walk = time.time()
-    walk_entries = get_walk_entries()
-    walking = True
 
-    while delay_queue.update(walk_entries):
-        if walking and len(walk_entries) == 0:
-            time_walk = time.time() - start_walk
-            logging.info("Finished processing existing files from a recursive walk. (%dm %ds)",
-                time_walk / 60, int(time_walk) % 60)
-            walking = False
-
+    while delay_queue.update():
         image_path, timestamp, event = delay_queue.peek()
         start_job = time.time()
         time_delay = start_job - timestamp
