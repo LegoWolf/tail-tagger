@@ -343,18 +343,14 @@ class Application:
     def write_xmp_tags(self, image_path, tags):
         start_write = time.time()
         if len(tags) > 0:
-            # Preserve the current modified time.
-            modified_time = os.path.getmtime(image_path)
             keywords = [tag.replace('_', ' ') for tag in tags]
             keywords_buffer = '\n'.join([f'set Xmp.dc.subject {kw}' for kw in keywords])
             _, _, stderr = self.run_command(
-                ['exiv2', '-m-', image_path],
+                ['exiv2', '-m-', '-k', image_path],
                 input_buffer=keywords_buffer)
             for error in stderr.splitlines():
                 logging.warning("%s (while setting tags on: %s)", error, image_path)
             logging.debug("Wrote XMP keywords to: %s", image_path)
-            access_time = os.path.getatime(image_path)
-            os.utime(image_path, times=(access_time, modified_time))
         return time.time() - start_write
 
     def image_processor(self, image_queue):
