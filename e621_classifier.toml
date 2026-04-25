@@ -1,6 +1,9 @@
 delay_seconds = 1
 ignore_seconds = 1
 score_cutoff = 0.30
+everything_walk = true
+# everything_instance = "1.5a"
+everything_retry_seconds = 60
 classified_tag_model = 'e621-model-{0}'
 classified_tag_score = 'e621-score-{0}'
 include_folders = [

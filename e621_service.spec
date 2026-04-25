@@ -7,6 +7,8 @@ a = Analysis(
     binaries=[
         ("exiv2.exe", "."),
         ("exiv2.dll", "."),
+        ("everything_sdk\\dll\\Everything3_x86.dll", "everything_sdk\\dll"),
+        ("everything_sdk\\dll\\Everything3_x64.dll", "everything_sdk\\dll"),
     ],
     datas=[
         ("e621_classifier.toml", "."),

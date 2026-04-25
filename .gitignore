@@ -3,6 +3,7 @@ venv/
 __pycache__/
 *.pyc
 *.log
+*.log.*.gz
 *.lock
 
 # IDE
@@ -37,6 +38,9 @@ classifiers/*/overrides.toml
 # PyInstaller build files
 build/
 dist/
+
+# Everything SDK
+everything_sdk
 
 # Exiv2 utility.
 exiv2.dll

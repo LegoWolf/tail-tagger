@@ -1,3 +1,5 @@
+import ctypes
+import datetime
 import logging
 import os
 import pathlib
@@ -33,6 +35,8 @@ DEFAULT_CONFIG = {
     "delay_seconds": 1,
     "ignore_seconds": 1,
     "score_cutoff": 0.30,
+    "everything_walk": False,
+    "everything_retry_seconds": 60,
     "classified_tag_model": 'e621-model-{0}',
     "classified_tag_score": 'e621-score-{0}',
     "include_folders": [ "D:/Downloads/yiffy" ],
@@ -54,11 +58,11 @@ class MonitorEventHandler(PatternMatchingEventHandler):
 
     def on_created(self, event: FileSystemEvent) -> None:
         logging.debug('Event: image created: queuing %s', event.src_path)
-        self.image_queue.put((event.src_path, time.time(), "created"))
+        self.image_queue.put(FileEntry(event.src_path, time.time(), FileEntry.EVENT_CREATED))
 
     def on_modified(self, event: FileSystemEvent) -> None:
         logging.debug('Event: image modified: queueing %s', event.src_path)
-        self.image_queue.put((event.src_path, time.time(), "modified"))
+        self.image_queue.put(FileEntry(event.src_path, time.time(), FileEntry.EVENT_MODIFIED))
 
 class Classifier:
     def __init__(self, model_path):
@@ -128,71 +132,158 @@ class Classifier:
             len(results), INTERNAL_THRESHOLD, score_cutoff)
         return [result[0] for result in results], time_preprocess, time_inference
 
+class Everything:
+    EVERYTHING3_PROPERTY_ID_PATH = 1 
+    EVERYTHING3_PROPERTY_ID_DATE_MODIFIED = 5
+    EVERYTHING3_PROPERTY_ID_PATH_AND_NAME = 240
+    EVERYTHING3_ERROR_IPC_PIPE_NOT_FOUND = 0xE0000002
+    PATH_BUFFER_SIZE = 260
+    WINDOWS_TICKS = int(1/10**-7)
+    WINDOWS_EPOCH = datetime.datetime.strptime('1601-01-01 00:00:00', '%Y-%m-%d %H:%M:%S')
+    POSIX_EPOCH = datetime.datetime.strptime('1970-01-01 00:00:00', '%Y-%m-%d %H:%M:%S')
+    EPOCH_DIFF = (POSIX_EPOCH - WINDOWS_EPOCH).total_seconds()
+    WINDOWS_TICKS_TO_POSIX_EPOCH = EPOCH_DIFF * WINDOWS_TICKS
+
+    def __init__(self, executable_path, instance_name=None):
+        dll_filepath = os.path.join(executable_path, "everything_sdk\\dll\\Everything3_x64.dll")
+        logging.info("Everything DLL path: %s", dll_filepath)
+        self.instance_name = instance_name
+        self.everything_dll = ctypes.WinDLL(dll_filepath)
+        self.everything_dll.Everything3_ConnectW.argtypes = [ctypes.c_wchar_p]
+        self.everything_dll.Everything3_ConnectW.restype = ctypes.c_void_p
+        self.everything_dll.Everything3_CreateSearchState.restype = ctypes.c_void_p
+        self.everything_dll.Everything3_SetSearchTextW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
+        self.everything_dll.Everything3_AddSearchPropertyRequest.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        self.everything_dll.Everything3_AddSearchPropertyRequest.restype = ctypes.c_bool
+        self.everything_dll.Everything3_Search.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        self.everything_dll.Everything3_Search.restype = ctypes.c_void_p
+        self.everything_dll.Everything3_GetResultListFileCount.argtypes = [ctypes.c_void_p]
+        self.everything_dll.Everything3_GetResultListFileCount.restype = ctypes.c_size_t
+        self.everything_dll.Everything3_GetResultFullPathNameW.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_wchar_p, ctypes.c_size_t]
+        self.everything_dll.Everything3_GetResultFullPathNameW.restype = ctypes.c_size_t
+        self.everything_dll.Everything3_GetResultDateModified.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+        self.everything_dll.Everything3_GetResultDateModified.restype = ctypes.c_uint64
+        self.everything_dll.Everything3_DestroyResultList.argtypes = [ctypes.c_void_p]
+        self.everything_dll.Everything3_DestroySearchState.argtypes = [ctypes.c_void_p]
+        self.everything_dll.Everything3_DestroyClient.argtypes = [ctypes.c_void_p]
+        self.everything_dll.Everything3_GetLastError.restype = ctypes.c_uint
+
+    def get_timestamp(self, filetime):
+        """Convert windows filetime winticks to python datetime.datetime."""
+        return (filetime - self.WINDOWS_TICKS_TO_POSIX_EPOCH) / self.WINDOWS_TICKS
+
+    def query(self, query):
+        client = None
+        state = None
+        result_list = None
+        results = []
+
+        try:
+            client = self.everything_dll.Everything3_ConnectW(self.instance_name)
+            state = self.everything_dll.Everything3_CreateSearchState()
+            self.everything_dll.Everything3_SetSearchTextW(state, query)
+            self.everything_dll.Everything3_AddSearchPropertyRequest(state, self.EVERYTHING3_PROPERTY_ID_PATH_AND_NAME)
+            self.everything_dll.Everything3_AddSearchPropertyRequest(state, self.EVERYTHING3_PROPERTY_ID_PATH)
+            self.everything_dll.Everything3_AddSearchPropertyRequest(state, self.EVERYTHING3_PROPERTY_ID_DATE_MODIFIED)
+
+            result_list = self.everything_dll.Everything3_Search(client, state)
+            if result_list is None:
+                error = self.everything_dll.Everything3_GetLastError()
+                logging.debug("Error communicating with Everything: 0x%x", error)
+                return None
+
+            num_results = self.everything_dll.Everything3_GetResultListFileCount(result_list)
+            filename = ctypes.create_unicode_buffer(self.PATH_BUFFER_SIZE)
+
+            for i in range(num_results):
+                self.everything_dll.Everything3_GetResultFullPathNameW(result_list, i, filename, self.PATH_BUFFER_SIZE)
+                date_modified_filetime = self.everything_dll.Everything3_GetResultDateModified(result_list, i)
+                results.append((ctypes.wstring_at(filename), self.get_timestamp(date_modified_filetime)))
+
+        except Exception as e:
+            logging.error("Failed to connect to Everything DLL: %s", e)
+
+        finally:
+            if result_list is not None:
+                self.everything_dll.Everything3_DestroyResultList(result_list)
+            if state is not None:
+                self.everything_dll.Everything3_DestroySearchState(state)
+            if client is not None:
+                self.everything_dll.Everything3_DestroyClient(client)
+
+        return results
+
+class FileEntry(object):
+    EVENT_CREATED = "created"
+    EVENT_MODIFIED = "modified"
+    EVENT_WALKED = "walked"
+    EVENT_QUIT = "quit"
+
+    def __init__(self, filepath, timestamp, event):
+        self.filepath = str(filepath)
+        self.timestamp = timestamp
+        self.event = event
+
+    def __repr__(self):
+        return f'FileEntry: {self.filepath} {self.timestamp} {self.event}'
+
+    def __lt__(self, other):
+        if self.event == other.event:
+            return self.timestamp < other.timestamp
+        else:
+            return self.event != self.EVENT_WALKED
+
 class FolderWalkEntries:
-    def __init__(self):
+    def __init__(self, entries_queue, classified_tag, executable_path):
         self.start_walk = time.time()
-        self.entries = []
+        self.entries_queue = entries_queue
+        self.classified_tag = classified_tag
+        self.executable_path = executable_path
+        if sys.platform == "win32" and config["everything_walk"]:
+            self.everything_walk()
+        else:
+            self.os_walk()
+
+    def everything_walk_worker(self, entries_queue):
+        everything = Everything(self.executable_path, config.get("everything_instance"))
+        entries = {}
+        for folder in config["include_folders"]:
+            query = f"!tags:{self.classified_tag} files: \"{folder}\""
+            while True:
+                results = everything.query(query)
+                if results is None:
+                    time.sleep(config["everything_retry_seconds"])
+                else:
+                    break
+            logging.debug(f"Everything query: '%s' (found %d files)", query, len(results))
+            for result in results:
+                if self.pattern_allowed(pathlib.Path(result[0])):
+                    entries[result[0]] = result[1]
+        logging.info("Walked folders with Everything, found %d files.", len(entries))
+        for filepath, timestamp in entries.items():
+            entries_queue.put(FileEntry(filepath, timestamp, FileEntry.EVENT_WALKED))
+
+    def everything_walk(self):
+        self.walk_thread = threading.Thread(target=self.everything_walk_worker, args=(self.entries_queue,), daemon=True)
+        self.walk_thread.start()
+
+    def os_walk(self):
+        entries = []
         for folder in config["include_folders"]:
             for root, dirs, files in os.walk(folder):
                 logging.debug("Complete walk: %s (%d files)", root, len(files))
                 for file in files:
                     filepath = pathlib.Path(os.path.join(root, file))
-                    include_match = any((filepath.match(pattern) for pattern in config["include_patterns"]))
-                    exclude_match = any((filepath.match(pattern) for pattern in config["exclude_patterns"]))
-                    if include_match and not exclude_match: 
-                        self.entries.append((filepath, os.path.getmtime(filepath), "walked"))
-        logging.debug("Filtered walk: %s files", len(self.entries))
-        self.entries.sort(key=lambda entry: entry[1])
+                    if self.pattern_allowed(filepath):
+                        entries.append(FileEntry(filepath, os.path.getmtime(filepath), FileEntry.EVENT_WALKED))
+        logging.info("Walked folders with OS, found %d files.", len(entries))
+        for entry in entries:
+            self.entries_queue.put(entry)
 
-    def __len__(self):
-        return len(self.entries)
-
-    def __next__(self):
-        if len(self.entries) == 0:
-            raise StopIteration
-        if len(self.entries) == 1:
-            time_walk = time.time() - self.start_walk
-            logging.info("Finished processing existing files from a recursive walk. (%dm %ds)",
-                time_walk / 60, int(time_walk) % 60)
-        return self.entries.pop()
-
-class DelayQueue:
-    def __init__(self, input_queue, latent_entries=None):
-        self.input_queue = input_queue
-        self.delay_queue = heapdict.heapdict()
-        self.delay_info = {}
-        self.latent_entries = latent_entries
-
-    def dequeue(self):
-        entry = self.input_queue.get()
-        if entry is None:
-            return False
-        (item, timestamp, info) = entry
-        self.delay_queue[item] = timestamp
-        self.delay_info[item] = info
-        return True
-
-    def update(self) -> bool:
-        while not self.input_queue.empty():
-            if not self.dequeue():
-                return False
-        if len(self.delay_queue) == 0:
-            if self.latent_entries is not None and len(self.latent_entries) > 0:
-                (item, timestamp, info) = next(self.latent_entries)
-                self.delay_queue[item] = timestamp
-                self.delay_info[item] = info
-                return True
-            if not self.dequeue():
-                return False
-        return True
-
-    def peek(self):
-        (item, timestamp) = self.delay_queue.peekitem()
-        return item, timestamp, self.delay_info[item]
-
-    def pop(self):
-        (item, timestamp) = self.delay_queue.popitem()
-        return item, timestamp, self.delay_info.pop(item)
+    def pattern_allowed(self, filepath):
+        include_match = any((filepath.match(pattern) for pattern in config["include_patterns"]))
+        exclude_match = any((filepath.match(pattern) for pattern in config["exclude_patterns"]))
+        return include_match and not exclude_match
 
 class TemporarySet:
     def __init__(self):
@@ -213,86 +304,6 @@ class TemporarySet:
             else:
                 break
 
-def run_command(args, input_buffer=None) -> bool:
-    process = subprocess.run(
-        args,
-        input=input_buffer,
-        encoding='utf-8',
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=True)
-    return process.returncode, process.stdout.strip(), process.stderr.strip()
-
-def check_has_xmp_tag(image_path, tag):
-    start_check = time.time()
-    _, stdout, stderr = run_command(['exiv2', '-px', 'pr', image_path])
-    for error in stderr.splitlines():
-        logging.warning('%s (while checking tags on: %s)', error, image_path)
-    has_tag = tag in stdout
-    time_check = time.time() - start_check
-    logging.debug('%s JTP-3 tag: %s (%.2fs)', "Has" if has_tag else "Missing", image_path, time_check)
-    return has_tag, time_check
-
-def write_xmp_tags(image_path, tags):
-    start_write = time.time()
-    if len(tags) > 0:
-        # Preserve the current modified time.
-        modified_time = os.path.getmtime(image_path)
-        keywords = [tag.replace('_', ' ') for tag in tags]
-        keywords_buffer = '\n'.join([f'set Xmp.dc.subject {kw}' for kw in keywords])
-        _, _, stderr = run_command(
-            ['exiv2', '-m-', image_path],
-            input_buffer=keywords_buffer)
-        for error in stderr.splitlines():
-            logging.warning("%s (while setting tags on: %s)", error, image_path)
-        logging.debug("Wrote XMP keywords to: %s", image_path)
-        access_time = os.path.getatime(image_path)
-        os.utime(image_path, times=(access_time, modified_time))
-    return time.time() - start_write
-
-def image_processor(image_queue):
-    classifier = Classifier(model_path=MODEL_PATH)
-    walk_entries = FolderWalkEntries()
-    delay_queue = DelayQueue(image_queue, walk_entries)
-    ignore_set = TemporarySet()
-    tag_model = config["classified_tag_model"].format("jtp3")
-    tag_score = config["classified_tag_score"].format(f"{config['score_cutoff']:.4f}")
-
-    while delay_queue.update():
-        image_path, timestamp, event = delay_queue.peek()
-        start_job = time.time()
-        time_delay = start_job - timestamp
-        ignore_set.drain(timestamp)
-
-        if ignore_set.check(str(image_path), timestamp):
-            delay_queue.pop()
-        elif time_delay < config["delay_seconds"]:
-            time.sleep(config["delay_seconds"] - time_delay)
-        else:
-            image_path, timestamp, event = delay_queue.pop()
-            logging.debug("Checking %s...", image_path)
-
-            try:
-                has_tag, time_check = check_has_xmp_tag(image_path, tag_model)
-                if not has_tag:
-                    tags, time_preprocess, time_inference = \
-                        classifier.classify_image(image_path, config["score_cutoff"])
-                    tags.extend([tag_model, tag_score])
-                    time_write = write_xmp_tags(image_path, tags)
-                    time_job = time.time() - start_job
-                    logging.info("%8s %.2fs %.2fs (%.2fs %.2fs %.2fs %.2fs) %3d %s",
-                        event, time_delay, time_job, time_check, time_preprocess,
-                        time_inference, time_write, len(tags), image_path)
-                ignore_set.add(str(image_path), time.time() + config["ignore_seconds"])
-
-            except subprocess.CalledProcessError as e:
-                logging.error("Called process '%s' failed: %s (return code: %d)",
-                    ' '.join(e.cmd), e.stderr.strip(), e.returncode)
-
-            except Exception as e:
-                logging.error("Image processing failed: %s (%s)", e, image_path)
-                logging.debug("Stack trace:\n%s", traceback.format_exc().strip())
-
 class Application:
     def __init__(self):
         self.executable_path = os.path.split(__main__.__file__)[0]
@@ -308,6 +319,95 @@ class Application:
 
     def set_log_level(self, log_level):
         self.log_level = log_level
+
+    def run_command(self, args, input_buffer=None) -> bool:
+        process = subprocess.run(
+            args,
+            input=input_buffer,
+            encoding='utf-8',
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True)
+        return process.returncode, process.stdout.strip(), process.stderr.strip()
+
+    def check_has_xmp_tag(self, image_path, tag):
+        start_check = time.time()
+        _, stdout, stderr = self.run_command(['exiv2', '-px', 'pr', image_path])
+        for error in stderr.splitlines():
+            logging.warning('%s (while checking tags on: %s)', error, image_path)
+        has_tag = tag in stdout
+        time_check = time.time() - start_check
+        logging.debug('%s JTP-3 tag: %s (%.2fs)', "Has" if has_tag else "Missing", image_path, time_check)
+        return has_tag, time_check
+
+    def write_xmp_tags(self, image_path, tags):
+        start_write = time.time()
+        if len(tags) > 0:
+            # Preserve the current modified time.
+            modified_time = os.path.getmtime(image_path)
+            keywords = [tag.replace('_', ' ') for tag in tags]
+            keywords_buffer = '\n'.join([f'set Xmp.dc.subject {kw}' for kw in keywords])
+            _, _, stderr = self.run_command(
+                ['exiv2', '-m-', image_path],
+                input_buffer=keywords_buffer)
+            for error in stderr.splitlines():
+                logging.warning("%s (while setting tags on: %s)", error, image_path)
+            logging.debug("Wrote XMP keywords to: %s", image_path)
+            access_time = os.path.getatime(image_path)
+            os.utime(image_path, times=(access_time, modified_time))
+        return time.time() - start_write
+
+    def image_processor(self, image_queue):
+        classifier = Classifier(model_path=MODEL_PATH)
+        ignore_set = TemporarySet()
+        found_walk = False
+
+        while True:
+            entry = image_queue.get()
+            if entry.event == FileEntry.EVENT_QUIT:
+                break
+
+            start_job = time.time()
+            time_delay = start_job - entry.timestamp
+            ignore_set.drain(entry.timestamp)
+
+            if not found_walk:
+                if entry.event == FileEntry.EVENT_WALKED:
+                    found_walk = True
+                    start_walk = time.time()
+            elif image_queue.empty():
+                time_walk = time.time() - start_walk
+                logging.info("Finished processing existing files from a recursive walk. (%dm %ds)",
+                    time_walk / 60, int(time_walk) % 60)
+                found_walk = False
+
+            if not ignore_set.check(entry.filepath, entry.timestamp):
+                if time_delay < config["delay_seconds"]:
+                    image_queue.put(entry)
+                    time.sleep(config["delay_seconds"] - time_delay)
+                else:
+                    logging.debug("Checking %s...", entry.filepath)
+
+                    try:
+                        has_tag, time_check = self.check_has_xmp_tag(entry.filepath, self.tag_model)
+                        if not has_tag:
+                            tags, time_preprocess, time_inference = \
+                                classifier.classify_image(entry.filepath, config["score_cutoff"])
+                            tags.extend([self.tag_model, self.tag_score])
+                            time_write = self.write_xmp_tags(entry.filepath, tags)
+                            time_job = time.time() - start_job
+                            logging.info("%8s %.2fs %.2fs (%.2fs %.2fs %.2fs %.2fs) %3d %s",
+                                entry.event, time_delay, time_job, time_check, time_preprocess,
+                                time_inference, time_write, len(tags), entry.filepath)
+                        ignore_set.add(entry.filepath, time.time() + config["ignore_seconds"])
+
+                    except subprocess.CalledProcessError as e:
+                        logging.error("Called process '%s' failed: %s (return code: %d)",
+                            ' '.join(e.cmd), e.stderr.strip(), e.returncode)
+
+                    except Exception as e:
+                        logging.error("Image processing failed: %s (%s)", e, entry.filepath)
+                        logging.debug("Stack trace:\n%s", traceback.format_exc().strip())
 
     def start(self, log_level=None):
         global config
@@ -332,12 +432,16 @@ class Application:
                 logging.error("Include folder does not exist: %s", folder_path)
                 return False
 
+        self.tag_model = config["classified_tag_model"].format("jtp3")
+        self.tag_score = config["classified_tag_score"].format(f"{config['score_cutoff']:.4f}")
+
         os.chdir(self.executable_path) 
         logging.debug("Working directory: %s", os.getcwd())
 
         try:
-            self.image_queue = queue.Queue()
-            self.worker_thread = threading.Thread(target=image_processor, args=(self.image_queue,))
+            self.image_queue = queue.PriorityQueue()
+            self.walker = FolderWalkEntries(self.image_queue, self.tag_model, self.executable_path)
+            self.worker_thread = threading.Thread(target=self.image_processor, args=(self.image_queue,))
             self.worker_thread.start()
 
             self.observer = Observer()
@@ -359,5 +463,5 @@ class Application:
     def stop(self):
         self.observer.stop()
         self.observer.join()
-        self.image_queue.put(None)
+        self.image_queue.put(FileEntry("", 0.0, event=FileEntry.EVENT_QUIT))
         self.worker_thread.join()
