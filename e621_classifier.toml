@@ -18,7 +18,7 @@ include_folders = [
 # Patterns follow the Python pattern language:
 # https://docs.python.org/3/library/pathlib.html#pathlib-pattern-language
 include_patterns = [
-	# Don't include GIFs or BMPS because they do not accept tags.
+	# Don't include GIFs or BMPs because they do not accept tags.
 	'*.jpg',
 	'*.jpeg',
 	'*.png',
