@@ -5,11 +5,13 @@ add e621 classification tags to every eligible image using the JTP-3 model.
 
 ## Installation Instructions
 
-1) Perform these steps as normal for installing tail-tagger:
+1) Perform these steps as normal for installing tail-tagger (see [README.md]):
    * Run `setup.bat`.
    * Run `venv\Scripts\activate.bat`
+   * Download the JTP-3 model and place it in correct classifier folder.
 2) Build the service package:
    * `python -m pip install -r requirements-service.txt`
+   * Download EverythingSDK3 and unzip it into `everything_sdk`
    * `pyinstaller --noconfirm e621-service.spec`
 3) Deploy the service package:
    * Stop the service if it already exists.

@@ -2,7 +2,7 @@ delay_seconds = 1
 ignore_seconds = 1
 score_cutoff = 0.30
 everything_walk = true
-# everything_instance = "1.5a"
+everything_instance = "1.5a"
 everything_retry_seconds = 60
 classified_tag_model = 'e621-model-{0}'
 classified_tag_score = 'e621-score-{0}'
@@ -18,11 +18,10 @@ include_folders = [
 # Patterns follow the Python pattern language:
 # https://docs.python.org/3/library/pathlib.html#pathlib-pattern-language
 include_patterns = [
-	# Don't include GIFs because they do not accept tags.
+	# Don't include GIFs or BMPS because they do not accept tags.
 	'*.jpg',
 	'*.jpeg',
 	'*.png',
-	'*.bmp',
 	'*.webp'
 ]
 
