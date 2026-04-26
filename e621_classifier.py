@@ -321,7 +321,7 @@ class Application:
     def set_log_level(self, log_level):
         self.log_level = log_level
 
-    def run_command(self, args, input_buffer=None) -> bool:
+    def run_command(self, args, input_buffer=None):
         process = subprocess.run(
             args,
             input=input_buffer,
@@ -346,12 +346,30 @@ class Application:
         if len(tags) > 0:
             keywords = [tag.replace('_', ' ') for tag in tags]
             keywords_buffer = '\n'.join([f'set Xmp.dc.subject {kw}' for kw in keywords])
-            _, _, stderr = self.run_command(
-                ['exiv2', '-m-', '-k', image_path],
-                input_buffer=keywords_buffer)
-            for error in stderr.splitlines():
-                logging.warning("%s (while setting tags on: %s)", error, image_path)
-            logging.debug("Wrote XMP keywords to: %s", image_path)
+            for _ in range(2):
+                try:
+                    _, _, stderr = self.run_command(
+                        ['exiv2', '-m-', '-k', image_path],
+                        input_buffer=keywords_buffer)
+                    for error in stderr.splitlines():
+                        logging.warning('%s (while setting tags on: %s)', error, image_path)
+                    logging.debug("Wrote XMP keywords to: %s", image_path)
+                    break
+
+                except subprocess.CalledProcessError as e:
+                    if e.returncode == 1 and "Size of XMP JPEG segment is larger than" in e.stderr:
+                        logging.error("Called process '%s' failed: %s (return code: %d)",
+                            ' '.join(e.cmd), e.stderr.strip(), e.returncode)
+                        logging.debug("Attempting to strip commonly space-consuming XMP properties from: %s...", image_path)
+                        strip_garbage = "del Xmp.xmpMM.History\ndel Xmp.photoshop.DocumentAncestors"
+                        _, _, stderr = self.run_command(
+                            ['exiv2', '-m-', '-k', image_path],
+                            input_buffer=strip_garbage)
+                        logging.info("Stripped commonly space-consuming XMP properties from: %s", image_path)
+                        for error in stderr.splitlines():
+                            logging.warning('%s (while stripping properties from: %s)', error, image_path)
+                    else:
+                        raise e
         return time.time() - start_write
 
     def image_processor(self, image_queue):
