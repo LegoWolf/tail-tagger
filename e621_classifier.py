@@ -321,7 +321,7 @@ class Application:
     def set_log_level(self, log_level):
         self.log_level = log_level
 
-    def run_command(self, args, input_buffer=None):
+    def run_command(self, args, context=None, input_buffer=None):
         process = subprocess.run(
             args,
             input=input_buffer,
@@ -329,13 +329,26 @@ class Application:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=True)
-        return process.returncode, process.stdout.strip(), process.stderr.strip()
+        stderr = process.stderr.strip()
+        if context is not None:
+            for error in stderr.splitlines():
+                logging.warning("%s (%s)", error, context)
+        return process.returncode, process.stdout.strip(), stderr
+
+    def prune_xmp_properties(self, image_path):
+        logging.debug("Attempting to strip commonly space-consuming XMP properties from: %s...", image_path)
+        strip_garbage = "del Xmp.xmpMM.History\ndel Xmp.photoshop.DocumentAncestors"
+        _, _, stderr = self.run_command(
+            ['exiv2', '-m-', '-k', image_path],
+            context=f"while stripping properties from: {image_path}",
+            input_buffer=strip_garbage)
+        logging.info("Stripped commonly space-consuming XMP properties from: %s", image_path)
 
     def check_has_xmp_tag(self, image_path, tag):
         start_check = time.time()
-        _, stdout, stderr = self.run_command(['exiv2', '-px', 'pr', image_path])
-        for error in stderr.splitlines():
-            logging.warning('%s (while checking tags on: %s)', error, image_path)
+        _, stdout, stderr = self.run_command(
+            ['exiv2', '-px', 'pr', image_path],
+            context=f"while checking tags on: {image_path}")
         has_tag = tag in stdout
         time_check = time.time() - start_check
         logging.debug('%s JTP-3 tag: %s (%.2fs)', "Has" if has_tag else "Missing", image_path, time_check)
@@ -346,28 +359,22 @@ class Application:
         if len(tags) > 0:
             keywords = [tag.replace('_', ' ') for tag in tags]
             keywords_buffer = '\n'.join([f'set Xmp.dc.subject {kw}' for kw in keywords])
-            for _ in range(2):
+            pruned = False
+            while True:
                 try:
                     _, _, stderr = self.run_command(
                         ['exiv2', '-m-', '-k', image_path],
+                        context=f"while setting tags on: {image_path}",
                         input_buffer=keywords_buffer)
-                    for error in stderr.splitlines():
-                        logging.warning('%s (while setting tags on: %s)', error, image_path)
                     logging.debug("Wrote XMP keywords to: %s", image_path)
                     break
 
                 except subprocess.CalledProcessError as e:
-                    if e.returncode == 1 and "Size of XMP JPEG segment is larger than" in e.stderr:
+                    if not pruned and e.returncode == 1 and "Size of XMP JPEG segment is larger than" in e.stderr:
                         logging.error("Called process '%s' failed: %s (return code: %d)",
                             ' '.join(e.cmd), e.stderr.strip(), e.returncode)
-                        logging.debug("Attempting to strip commonly space-consuming XMP properties from: %s...", image_path)
-                        strip_garbage = "del Xmp.xmpMM.History\ndel Xmp.photoshop.DocumentAncestors"
-                        _, _, stderr = self.run_command(
-                            ['exiv2', '-m-', '-k', image_path],
-                            input_buffer=strip_garbage)
-                        logging.info("Stripped commonly space-consuming XMP properties from: %s", image_path)
-                        for error in stderr.splitlines():
-                            logging.warning('%s (while stripping properties from: %s)', error, image_path)
+                        self.prune_xmp_properties(image_path)
+                        pruned = True
                     else:
                         raise e
         return time.time() - start_write
@@ -396,14 +403,13 @@ class Application:
                     humanize.precisedelta(time_walk, minimum_unit='seconds'))
                 found_walk = False
 
-            if not ignore_set.check(entry.filepath, entry.timestamp):
-                if time_delay < config["delay_seconds"]:
-                    image_queue.put(entry)
-                    time.sleep(config["delay_seconds"] - time_delay)
-                else:
-                    logging.debug("Checking %s...", entry.filepath)
-
-                    try:
+            try:
+                if not ignore_set.check(entry.filepath, entry.timestamp):
+                    if time_delay < config["delay_seconds"]:
+                        image_queue.put(entry)
+                        time.sleep(config["delay_seconds"] - time_delay)
+                    else:
+                        logging.debug("Checking %s...", entry.filepath)
                         has_tag, time_check = self.check_has_xmp_tag(entry.filepath, self.tag_model)
                         if not has_tag:
                             tags, time_preprocess, time_inference = \
@@ -414,15 +420,17 @@ class Application:
                             logging.info("%8s %.2fs %.2fs (%.2fs %.2fs %.2fs %.2fs) %3d %s",
                                 entry.event, time_delay, time_job, time_check, time_preprocess,
                                 time_inference, time_write, len(tags), entry.filepath)
-                        ignore_set.add(entry.filepath, time.time() + config["ignore_seconds"])
 
-                    except subprocess.CalledProcessError as e:
-                        logging.error("Called process '%s' failed: %s (return code: %d)",
-                            ' '.join(e.cmd), e.stderr.strip(), e.returncode)
+            except subprocess.CalledProcessError as e:
+                logging.error("Called process '%s' failed: %s (return code: %d)",
+                    ' '.join(e.cmd), e.stderr.strip(), e.returncode)
 
-                    except Exception as e:
-                        logging.error("Image processing failed: %s (%s)", e, entry.filepath)
-                        logging.debug("Stack trace:\n%s", traceback.format_exc().strip())
+            except Exception as e:
+                logging.error("Image processing failed: %s (%s)", e, entry.filepath)
+                logging.debug("Stack trace:\n%s", traceback.format_exc().strip())
+
+            finally:
+                ignore_set.add(entry.filepath, time.time() + config["ignore_seconds"])
 
     def start(self, log_level=None):
         global config
