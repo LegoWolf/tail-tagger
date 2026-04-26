@@ -21,6 +21,7 @@ include_patterns = [
 	# Don't include GIFs or BMPs because they do not accept tags.
 	'*.jpg',
 	'*.jpeg',
+	'*.jfif',
 	'*.png',
 	'*.webp'
 ]

@@ -13,6 +13,7 @@ import __main__
  
 import concurrent_log_handler
 import heapdict
+import humanize
 import torch
 
 from watchdog.events import FileSystemEvent, PatternMatchingEventHandler
@@ -373,8 +374,8 @@ class Application:
                     start_walk = time.time()
             elif image_queue.empty():
                 time_walk = time.time() - start_walk
-                logging.info("Finished processing existing files from a recursive walk. (%dm %ds)",
-                    time_walk / 60, int(time_walk) % 60)
+                logging.info("Finished processing existing files from a recursive walk. (%s)",
+                    humanize.precisedelta(time_walk, minimum_unit='seconds'))
                 found_walk = False
 
             if not ignore_set.check(entry.filepath, entry.timestamp):

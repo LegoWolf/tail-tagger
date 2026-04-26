@@ -10,3 +10,4 @@ tomli>=2.0.0; python_version < "3.11"
 watchdog>=6.0.0
 heapdict>=1.0.0
 concurrent-log-handler>=0.9.0
+humanize>=4.15.0
