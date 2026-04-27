@@ -407,6 +407,7 @@ class Application:
                 if not ignore_set.check(entry.filepath, entry.timestamp):
                     if time_delay < config["delay_seconds"]:
                         image_queue.put(entry)
+                        logging.info("Sleeping %.2fs", config["delay_seconds"] - time_delay)
                         time.sleep(config["delay_seconds"] - time_delay)
                     else:
                         logging.debug("Checking %s...", entry.filepath)
@@ -424,6 +425,14 @@ class Application:
             except subprocess.CalledProcessError as e:
                 logging.error("Called process '%s' failed: %s (return code: %d)",
                     ' '.join(e.cmd), e.stderr.strip(), e.returncode)
+                try:
+                    if e.returncode == 1 and "Writing to GIF images is not supported" in e.stderr:
+                        new_filepath = os.path.splitext(entry.filepath)[0] + '.gif'
+                        os.rename(entry.filepath, new_filepath)
+                        logging.info("Renamed %s to %s", entry.filepath, new_filepath)
+                        ignore_set.add(new_filepath, time.time() + config["ignore_seconds"])
+                except Exception as e:
+                    logging.error("Failed to rename to GIF: %s (%s)", entry.filepath, e)
 
             except Exception as e:
                 logging.error("Image processing failed: %s (%s)", e, entry.filepath)
